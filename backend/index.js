@@ -24,7 +24,7 @@ app.use(
     },
   }),
 );
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '15mb' }));
 
 const hasApiKey = Boolean(process.env.OPENAI_API_KEY);
 const openai = hasApiKey ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
@@ -76,21 +76,26 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', model, hasApiKey });
 });
 
-app.post('/api/analyze', async (req, res) => {
-  const { assignmentText, pdfBase64 } = req.body || {};
-  if (!assignmentText && !pdfBase64) {
-    return res.status(400).json({ error: 'assignmentText or pdfBase64 is required' });
-  }
-  try {
-    let assignmentPlain = assignmentText;
-    if (!assignmentPlain && pdfBase64) {
-      const buffer = Buffer.from(pdfBase64, 'base64');
-      const parsed = await pdfParse(buffer);
-      assignmentPlain = parsed.text;
-    }
-    if (!assignmentPlain) {
-      return res.status(400).json({ error: 'failed_to_extract_text' });
-    }
+	app.post('/api/analyze', async (req, res) => {
+	  const { assignmentText, pdfBase64 } = req.body || {};
+	  if (!assignmentText && !pdfBase64) {
+	    return res.status(400).json({ error: 'assignmentText or pdfBase64 is required' });
+	  }
+	  try {
+	    let assignmentPlain = assignmentText;
+	    if (!assignmentPlain && pdfBase64) {
+	      try {
+	        const buffer = Buffer.from(pdfBase64, 'base64');
+	        const parsed = await pdfParse(buffer);
+	        assignmentPlain = parsed.text;
+	      } catch (parseErr) {
+	        console.error('pdf parse error', parseErr);
+	        return res.status(400).json({ error: 'failed_to_extract_text' });
+	      }
+	    }
+	    if (!assignmentPlain) {
+	      return res.status(400).json({ error: 'failed_to_extract_text' });
+	    }
 
     const { fallback, text: llmText } = await runLLM({
       messages: [
@@ -100,21 +105,21 @@ app.post('/api/analyze', async (req, res) => {
       maxTokens: 700,
     });
 
-    let parsed = safeParseJson(llmText);
-    if (!parsed) {
-      parsed = {
-        summary: '요약을 생성하지 못했습니다. 간단히 핵심을 다시 적어 주세요.',
-        topics: [
-          { id: 't1', title: '주제 1', description: 'AI 키가 없어 기본 주제만 생성되었습니다.' },
-        ],
-      };
-    }
-    return res.json({ analysis: parsed, text: assignmentPlain, fallback });
-  } catch (err) {
-    console.error('analyze error', err);
-    return res.status(500).json({ error: 'analyze_failed' });
-  }
-});
+	    let parsed = safeParseJson(llmText);
+	    if (!parsed) {
+	      parsed = {
+	        summary: '요약을 생성하지 못했습니다. 간단히 핵심을 다시 적어 주세요.',
+	        topics: [
+	          { id: 't1', title: '주제 1', description: 'AI 키가 없어 기본 주제만 생성되었습니다.' },
+	        ],
+	      };
+	    }
+	    return res.json({ analysis: parsed, text: assignmentPlain, fallback });
+	  } catch (err) {
+	    console.error('analyze error', err);
+	    return res.status(500).json({ error: 'analyze_failed', detail: err.message || 'unknown' });
+	  }
+	});
 
 app.post('/api/question', async (req, res) => {
   const { summary, topic, excerpt, previousQA = [], studentAnswer } = req.body || {};
