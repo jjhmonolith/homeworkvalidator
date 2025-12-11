@@ -59,7 +59,7 @@ async function runLLM({ messages, maxTokens = 800, responseFormat }) {
     max_output_tokens: maxTokens,
     input: messages,
     // `thinking` currently rejected by some model variants; omit for compatibility.
-    text: responseFormat ? { format: responseFormat } : undefined,
+    text: responseFormat ? { format: { type: responseFormat } } : undefined,
   });
   const text = extractTextFromResponse(response);
   return { fallback: false, text, raw: response };
