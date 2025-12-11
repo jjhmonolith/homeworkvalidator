@@ -58,7 +58,7 @@ async function runLLM({ messages, maxTokens = 800 }) {
     model,
     max_output_tokens: maxTokens,
     input: messages,
-    thinking: { effort: 'medium' },
+    // `thinking` currently rejected by some model variants; omit for compatibility.
   });
   const text = extractTextFromResponse(response);
   return { fallback: false, text, raw: response };
