@@ -8,9 +8,22 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 4010;
-const FRONT_ORIGIN = process.env.FRONT_ORIGIN || 'http://localhost:3010';
+const FRONT_ORIGINS = (process.env.FRONT_ORIGIN || 'http://localhost:3010')
+  .split(',')
+  .map((o) => o.trim().replace(/\/$/, ''))
+  .filter(Boolean);
 
-app.use(cors({ origin: FRONT_ORIGIN }));
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow no-origin (curl/postman) or exact match after trimming trailing slash.
+      if (!origin) return callback(null, true);
+      const normalized = origin.replace(/\/$/, '');
+      const allowed = FRONT_ORIGINS.includes(normalized);
+      return callback(allowed ? null : new Error('CORS blocked'), allowed);
+    },
+  }),
+);
 app.use(express.json({ limit: '5mb' }));
 
 const hasApiKey = Boolean(process.env.OPENAI_API_KEY);
