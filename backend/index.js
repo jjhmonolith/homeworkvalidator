@@ -59,7 +59,7 @@ async function runLLM({ messages, maxTokens = 800, responseFormat }) {
     max_output_tokens: maxTokens,
     input: messages,
     // `thinking` currently rejected by some model variants; omit for compatibility.
-    response_format: responseFormat,
+    text: responseFormat ? { format: responseFormat } : undefined,
   });
   const text = extractTextFromResponse(response);
   return { fallback: false, text, raw: response };
@@ -104,7 +104,7 @@ app.get('/health', (_req, res) => {
         { role: 'user', content: (assignmentPlain || '').slice(0, 16000) },
       ],
       maxTokens: 700,
-      responseFormat: { type: 'json_object' },
+      responseFormat: 'json_object',
     });
 
 	    let parsed = safeParseJson(llmText);
@@ -159,7 +159,7 @@ app.post('/api/summary', async (req, res) => {
         { role: 'user', content: userContent.slice(0, 15000) },
       ],
       maxTokens: 600,
-      responseFormat: { type: 'json_object' },
+      responseFormat: 'json_object',
     });
     let parsed = safeParseJson(text);
     if (!parsed) {
