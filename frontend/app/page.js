@@ -66,7 +66,7 @@ async function apiFetch(path, payload) {
 
 export default function Home() {
   const [phase, setPhase] = useState("upload");
-  const [assignment, setAssignment] = useState({ summary: "", topics: [], text: "" });
+  const [assignment, setAssignment] = useState({ topics: [], text: "" });
   const [topicsState, setTopicsState] = useState([]);
   const [currentTopicIndex, setCurrentTopicIndex] = useState(0);
   const [aiGenerating, setAiGenerating] = useState(false);
@@ -125,8 +125,8 @@ export default function Home() {
 
   const fetchQuestion = async ({ topic, previousQA, studentAnswer }) => {
     const data = await apiFetch("/api/question", {
-      summary: assignment.summary,
       topic,
+      assignmentText: assignment.text || "",
       excerpt: (assignment.text || "").slice(0, 1500),
       previousQA,
       studentAnswer,
@@ -158,10 +158,10 @@ export default function Home() {
         started: false,
         asked: false,
       }));
-      setAssignment({ summary: data.analysis.summary, topics: normalizedTopics, text: data.text || "" });
+      setAssignment({ topics: normalizedTopics, text: data.text || "" });
       setTopicsState(normalizedTopics);
       setCurrentTopicIndex(0);
-      await prepareTopic(0, normalizedTopics, data.analysis.summary, data.text || "");
+      await prepareTopic(0, normalizedTopics, data.text || "");
     } catch (err) {
       console.error(err);
       setError(err.message || "업로드에 실패했습니다.");
@@ -169,7 +169,7 @@ export default function Home() {
     }
   };
 
-  const prepareTopic = useCallback(async (index, nextTopics, summary, text) => {
+  const prepareTopic = useCallback(async (index, nextTopics, text) => {
     setPrepLabel(`${index + 1}번째 주제 준비중`);
     setPhase("prep");
     setModal(null);
@@ -192,8 +192,8 @@ export default function Home() {
         return;
       }
       const question = await apiFetch("/api/question", {
-        summary,
         topic,
+        assignmentText: text || "",
         excerpt: (text || "").slice(0, 1500),
         previousQA: [],
         studentAnswer: "",
@@ -275,8 +275,8 @@ export default function Home() {
         const transcript = buildTranscript(doneTopics);
         const data = await apiFetch("/api/summary", {
           transcript,
-          summary: assignment.summary,
           topics: assignment.topics,
+          assignmentText: assignment.text || "",
         });
         setResultSummary(data.summary);
       } catch (err) {
@@ -287,7 +287,7 @@ export default function Home() {
         setAiGenerating(false);
       }
     },
-    [assignment.summary, assignment.topics],
+    [assignment.topics, assignment.text],
   );
 
   const triggerAutoModal = () => {
@@ -316,13 +316,13 @@ export default function Home() {
 
       const nextIndex = currentTopicIndex + 1;
       if (nextIndex < topicsState.length) {
-        await prepareTopic(nextIndex, updated, assignment.summary, assignment.text);
+        await prepareTopic(nextIndex, updated, assignment.text);
       } else {
         await finalizeSession(updated);
       }
       setAdvancing(false);
     },
-    [advancing, topicsState, currentTopicIndex, assignment.summary, assignment.text, prepareTopic, finalizeSession],
+    [advancing, topicsState, currentTopicIndex, assignment.text, prepareTopic, finalizeSession],
   );
 
   useEffect(() => {
@@ -343,7 +343,7 @@ export default function Home() {
 
   const handleReset = () => {
     setPhase("upload");
-    setAssignment({ summary: "", topics: [], text: "" });
+    setAssignment({ topics: [], text: "" });
     setTopicsState([]);
     setCurrentTopicIndex(0);
     setAiGenerating(false);

@@ -30,7 +30,7 @@ const hasApiKey = Boolean(process.env.OPENAI_API_KEY);
 const openai = hasApiKey ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const model = process.env.OPENAI_MODEL || 'gpt-5.1'; // target: gpt-5.1-mini when available
 
-const analyzeSystemPrompt = `너는 대학생 과제 이해도 인터뷰를 준비하는 조교 AI이다.\n다음 한국어 에세이/레포트를 읽고, 5개 이하의 주제 블록으로 나누고,\n각 블록의 제목과 설명, 전체 요약을 한국어로 JSON 형식으로 만들어라.\n\n응답 형식(JSON):\n{\n  "summary": "전체 내용을 한국어로 3~4문장 요약",\n  "topics": [\n    { "id": "t1", "title": "주제 제목", "description": "이 주제가 다루는 핵심 내용을 2~3문장으로 설명" }\n  ]\n}\n반드시 위 JSON 형식만 반환하고, 다른 텍스트는 포함하지 마라.`;
+const analyzeSystemPrompt = `너는 대학생 과제 이해도 인터뷰를 준비하는 조교 AI이다.\n다음 한국어 에세이/레포트를 읽고, 5개 이하의 주제 블록으로 나누고,\n각 블록의 제목과 설명을 한국어로 JSON 형식으로 만들어라.\n\n응답 형식(JSON):\n{\n  "topics": [\n    { "id": "t1", "title": "주제 제목", "description": "이 주제가 다루는 핵심 내용을 2~3문장으로 설명" }\n  ]\n}\n반드시 위 JSON 형식만 반환하고, 다른 텍스트는 포함하지 마라. 요약은 만들지 않는다.`;
 
 const generateSystemPrompt = `너는 과제를 검사하는 교수가 아니라,\n학생이 스스로 과제 내용을 이해했는지 확인해 주는 조교 AI이다.\n\n규칙:\n- 반드시 한국어의 존댓말(예: ~습니다, ~세요)로만 질문하고 답한다.\n- 학생을 압박하기보다는, 이해를 도와주는 방향으로 질문한다.\n- 한 번에 하나의 질문만 한다.\n- 질문은 반드시 과제 본문/요약/주제 설명에 실제로 등장하는 내용과 범위에만 근거해야 한다.\n- 과제 본문에 없는 개념, 사례, 이론, 배경지식 등을 새로 만들어 질문하지 않는다.\n- "만약 ~라면?" 같은 과제 범위를 크게 벗어나는 가정이나, 과제에 전혀 언급되지 않은 사회 이슈/정책/철학을 묻지 않는다.\n- 학생에게는 과제 본문에 이미 등장한 내용/주장을 자신의 말로 다시 설명하게 하거나, 그 이유/근거/의미를 묻는 방식으로 질문한다.\n- 질문은 학생이 과제와 자신의 답변이 일치하는지 "직접 검사"하게 만드는 형식이 아니라,\n  AI가 과제 내용을 기준으로 학생의 이해도를 검증하기 위한 구체적인 내용 질문이어야 한다.\n- 예를 들어, 특정 수치/개념/주장을 물어보고 학생이 답하면,\n  그 답이 과제 본문과 일치하는지 여부는 AI가 내부적으로 판단하고 피드백해야 하며,\n  학생에게 "과제 본문과 일치하는지 다시 확인해 보세요"와 같이 메타적인 확인 요청을 하지 않는다.\n(모델 input에는 위 시스템 프롬프트와 함께, 과제 요약/현재 주제 설명/본문 발췌/이전 Q&A/학생의 최신 답변이 함께 들어갑니다.)`;
 
@@ -74,6 +74,29 @@ function safeParseJson(text) {
   }
 }
 
+function parseJsonRelaxed(text) {
+  if (!text) return null;
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/, '');
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) return null;
+  const sliced = cleaned.slice(firstBrace, lastBrace + 1);
+  try {
+    return JSON.parse(sliced);
+  } catch (err) {
+    try {
+      // remove control characters and retry
+      const stripped = sliced.replace(/[\u0000-\u001f]+/g, '');
+      return JSON.parse(stripped);
+    } catch (err2) {
+      return null;
+    }
+  }
+}
+
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', model, hasApiKey });
 });
@@ -108,7 +131,7 @@ app.get('/health', (_req, res) => {
       responseFormat: 'json_object',
     });
 
-    let parsed = safeParseJson(llmText);
+    let parsed = safeParseJson(llmText) || parseJsonRelaxed(llmText);
     if (!parsed) {
       console.warn('analyze JSON parse failed', {
         fallback,
@@ -116,13 +139,20 @@ app.get('/health', (_req, res) => {
         snippet: (llmText || '').slice(0, 400),
       });
       parsed = {
-        summary: '요약을 생성하지 못했습니다. 간단히 핵심을 다시 적어 주세요.',
         topics: [
           { id: 't1', title: '주제 1', description: 'AI 응답을 파싱하지 못했습니다. 다시 시도해 주세요.' },
         ],
       };
     }
-	    return res.json({ analysis: parsed, text: assignmentPlain, fallback });
+    // Normalize topics length and ids
+    const topics = (parsed.topics && Array.isArray(parsed.topics))
+      ? parsed.topics.slice(0, 5).map((t, idx) => ({
+          id: t.id || `t${idx + 1}`,
+          title: t.title || `주제 ${idx + 1}`,
+          description: t.description || '',
+        }))
+      : [];
+    return res.json({ analysis: { topics }, text: assignmentPlain, fallback });
 	  } catch (err) {
 	    console.error('analyze error', err);
 	    return res.status(500).json({ error: 'analyze_failed', detail: err.message || 'unknown' });
@@ -130,11 +160,12 @@ app.get('/health', (_req, res) => {
 	});
 
 app.post('/api/question', async (req, res) => {
-  const { summary, topic, excerpt, previousQA = [], studentAnswer } = req.body || {};
-  if (!summary || !topic) {
-    return res.status(400).json({ error: 'summary and topic are required' });
+  const { summary, topic, excerpt, assignmentText, previousQA = [], studentAnswer } = req.body || {};
+  if (!topic) {
+    return res.status(400).json({ error: 'topic is required' });
   }
-  const userContext = `과제 요약:\n${summary}\n\n현재 주제: ${topic.title}\n${topic.description}\n\n본문 발췌:\n${excerpt || '발췌 없음'}\n\n이전 Q&A:\n${previousQA.map((turn) => `${turn.role === 'ai' ? 'AI' : '학생'}: ${turn.text}`).join('\n') || '없음'}\n\n학생 최신 답변:\n${studentAnswer || '없음'}`;
+  const docContent = (assignmentText || excerpt || '').slice(0, 14000) || '본문 없음';
+  const userContext = `과제 본문(일부):\n${docContent}\n\n현재 주제: ${topic.title}\n${topic.description}\n\n요약(선택):\n${summary || '제공되지 않음'}\n\n이전 Q&A:\n${previousQA.map((turn) => `${turn.role === 'ai' ? 'AI' : '학생'}: ${turn.text}`).join('\n') || '없음'}\n\n학생 최신 답변:\n${studentAnswer || '없음'}`;
 
   try {
     const { fallback, text } = await runLLM({
@@ -153,11 +184,12 @@ app.post('/api/question', async (req, res) => {
 });
 
 app.post('/api/summary', async (req, res) => {
-  const { transcript, summary, topics } = req.body || {};
+  const { transcript, summary, topics, assignmentText } = req.body || {};
   if (!transcript) {
     return res.status(400).json({ error: 'transcript is required' });
   }
-  const userContent = `과제 요약:\n${summary || ''}\n\n주제 목록:\n${(topics || []).map((t) => `${t.title}: ${t.description}`).join('\n')}\n\n대화 로그:\n${transcript}`;
+  const docContent = (assignmentText || '').slice(0, 14000);
+  const userContent = `과제 본문(일부):\n${docContent}\n\n주제 목록:\n${(topics || []).map((t) => `${t.title}: ${t.description}`).join('\n')}\n\n대화 로그:\n${transcript}`;
   try {
     const { fallback, text } = await runLLM({
       messages: [
@@ -167,7 +199,7 @@ app.post('/api/summary', async (req, res) => {
       maxTokens: 600,
       responseFormat: 'json_object',
     });
-    let parsed = safeParseJson(text);
+    let parsed = safeParseJson(text) || parseJsonRelaxed(text);
     if (!parsed) {
       parsed = {
         strengths: [],
