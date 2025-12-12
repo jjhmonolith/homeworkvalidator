@@ -36,24 +36,33 @@ const generateSystemPrompt = `너는 과제를 검사하는 교수가 아니라,
 
 const summarizeSystemPrompt = `너는 학생의 과제 이해도와 "과제에 대한 소유감"을 평가하는 조교이다.\n대화를 읽고, 학생이 과제 내용을 얼마나 이해하고 있는지,\n실제로 과제를 읽어보고 자신의 생각에 맞게 고쳤거나 검증했는지를 추론해야 한다.\n\n일반적인 과제 유형(조사/보고서/의견 에세이)을 가정하고 다음을 살펴보라:\n- 학생이 과제의 핵심 주장과 구조(서론-본론-결론 또는 주요 항목들)를 자신의 말로 설명할 수 있는지\n- 과제에 나온 구체적인 내용(예: 수치, 사례, 인용, 정의)을 자연스럽게 언급하고 설명하는지\n- "너무 일반적인 AI스러운 말"만 반복하는지, 아니면 과제에 실제로 등장하는 디테일을 이해하고 활용하는지\n- 질문에 대한 답변이 과제 본문과 논리적으로 일관된지, 전혀 다른 이야기를 하는지\n\n이 정보를 바탕으로, 학생이 과제를 직접 작성했거나\n최소한 AI가 만들어 준 결과물을 꼼꼼히 읽고 자신의 생각에 맞게 수정·검증했을 가능성이\n높은지/낮은지를 판단하고, overallComment에 그 판단을 부드럽게 서술하라.\n\n또한, 학생의 발화 내용이 제출된 과제 본문과 얼마나 잘 일치하는지 평가하라.\n과제에 포함된 주장/근거/예시와 전혀 관련이 없는 이야기를 하는지,\n혹은 과제 내용과 모순되는 설명을 하는지 주의 깊게 살펴보라.\n\n중요:\n- 'AI:'로 시작하는 줄은 AI의 발화이며, 평가에 사용하지 않는다.\n- '학생:'으로 시작하는 줄만 학생의 이해도 평가에 사용한다.\n- 학생이 더 많은 질문에 도전했을 경우(대화 길이가 길수록),\n  일부 질문에 정확히 답하지 못하더라도, 매우 짧게만 대답하고 넘어간 경우보다\n  약간 더 긍정적인 평가를 받는 경향이 있도록 판단하라.\n- 학생이 한 마디도 하지 않았다면, strengths는 빈 배열로 두고,\n  overallComment에 "학생의 응답이 없어 이해도를 평가할 수 없습니다."와 비슷한 문장을 써라.\n\n응답 JSON 형식:\n{\n  "strengths": ["..."],\n  "weaknesses": ["..."],\n  "overallComment": "..."\n}`;
 
-function extractTextFromResponse(response) {
-  if (!response) return '';
-  if (response.output_text) return response.output_text;
-  if (response.output && Array.isArray(response.output)) {
-    const content = response.output[0]?.content;
-    if (Array.isArray(content)) {
-      return content.map((item) => item.text || '').join(' ').trim();
+function extractFromResponse(response) {
+  let json = null;
+  let text = '';
+  if (!response) return { text: '', json: null };
+  if (response.output) {
+    const chunk = response.output[0];
+    if (chunk?.content && Array.isArray(chunk.content)) {
+      chunk.content.forEach((item) => {
+        if (item.json) json = item.json;
+        if (item.text) text += item.text;
+      });
+      text = text.trim();
     }
   }
-  // chat-completions fallback
-  const choice = response.choices?.[0];
-  if (choice?.message?.content) return choice.message.content;
-  return '';
+  if (!text && response.output_text) {
+    text = response.output_text;
+  }
+  if (!text) {
+    const choice = response.choices?.[0];
+    if (choice?.message?.content) text = choice.message.content;
+  }
+  return { text, json };
 }
 
 async function runLLM({ messages, maxTokens = 800, responseFormat }) {
   if (!openai) {
-    return { fallback: true, text: '', raw: null };
+    return { fallback: true, text: '', json: null, raw: null };
   }
   const response = await openai.responses.create({
     model,
@@ -62,8 +71,8 @@ async function runLLM({ messages, maxTokens = 800, responseFormat }) {
     // `thinking` currently rejected by some model variants; omit for compatibility.
     text: responseFormat ? { format: { type: responseFormat } } : undefined,
   });
-  const text = extractTextFromResponse(response);
-  return { fallback: false, text, raw: response };
+  const { text, json } = extractFromResponse(response);
+  return { fallback: false, text, json, raw: response };
 }
 
 function safeParseJson(text) {
@@ -122,7 +131,7 @@ app.get('/health', (_req, res) => {
 	      return res.status(400).json({ error: 'failed_to_extract_text' });
 	    }
 
-    const { fallback, text: llmText } = await runLLM({
+    const { fallback, text: llmText, json: llmJson } = await runLLM({
       messages: [
         { role: 'system', content: analyzeSystemPrompt },
         { role: 'user', content: (assignmentPlain || '').slice(0, 16000) },
@@ -131,7 +140,7 @@ app.get('/health', (_req, res) => {
       responseFormat: 'json_object',
     });
 
-    let parsed = safeParseJson(llmText) || parseJsonRelaxed(llmText);
+    let parsed = llmJson || safeParseJson(llmText) || parseJsonRelaxed(llmText);
     if (!parsed) {
       console.warn('analyze JSON parse failed', {
         fallback,
@@ -191,7 +200,7 @@ app.post('/api/summary', async (req, res) => {
   const docContent = (assignmentText || '').slice(0, 14000);
   const userContent = `과제 본문(일부):\n${docContent}\n\n주제 목록:\n${(topics || []).map((t) => `${t.title}: ${t.description}`).join('\n')}\n\n대화 로그:\n${transcript}`;
   try {
-    const { fallback, text } = await runLLM({
+    const { fallback, text, json } = await runLLM({
       messages: [
         { role: 'system', content: summarizeSystemPrompt },
         { role: 'user', content: userContent.slice(0, 15000) },
@@ -199,7 +208,7 @@ app.post('/api/summary', async (req, res) => {
       maxTokens: 600,
       responseFormat: 'json_object',
     });
-    let parsed = safeParseJson(text) || parseJsonRelaxed(text);
+    let parsed = json || safeParseJson(text) || parseJsonRelaxed(text);
     if (!parsed) {
       parsed = {
         strengths: [],
