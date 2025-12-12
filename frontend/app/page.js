@@ -426,6 +426,13 @@ export default function Home() {
 function UploadCard({ onUpload }) {
   const [fileName, setFileName] = useState("");
 
+  const handleFileSelect = (file) => {
+    if (file) {
+      setFileName(file.name);
+      onUpload(file);
+    }
+  };
+
   return (
     <div className={styles.card}>
       <div className={styles.cardHeader}>
@@ -438,17 +445,22 @@ function UploadCard({ onUpload }) {
         </div>
         <div className={styles.uploadHelper}>PDF만 허용 · 세션 저장 없음</div>
       </div>
-      <label className={styles.uploadArea}>
+      <label
+        className={styles.uploadArea}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          const file = e.dataTransfer.files?.[0];
+          handleFileSelect(file);
+        }}
+      >
         <input
           type="file"
           accept="application/pdf"
           className={styles.fileInput}
           onChange={(e) => {
             const file = e.target.files?.[0];
-            setFileName(file ? file.name : "");
-            if (file) {
-              onUpload(file);
-            }
+            handleFileSelect(file);
           }}
         />
         <div>
