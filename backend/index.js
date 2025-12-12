@@ -38,6 +38,7 @@ const summarizeSystemPrompt = `너는 학생의 과제 이해도와 "과제에 �
 
 function extractTextFromResponse(response) {
   if (!response) return '';
+  if (response.output_text) return response.output_text;
   if (response.output && Array.isArray(response.output)) {
     const content = response.output[0]?.content;
     if (Array.isArray(content)) {
@@ -109,6 +110,11 @@ app.get('/health', (_req, res) => {
 
     let parsed = safeParseJson(llmText);
     if (!parsed) {
+      console.warn('analyze JSON parse failed', {
+        fallback,
+        textLength: llmText?.length || 0,
+        snippet: (llmText || '').slice(0, 400),
+      });
       parsed = {
         summary: '요약을 생성하지 못했습니다. 간단히 핵심을 다시 적어 주세요.',
         topics: [
