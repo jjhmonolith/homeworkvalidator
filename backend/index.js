@@ -102,6 +102,7 @@ function safeParseJson(text) {
   try {
     return JSON.parse(text);
   } catch (err) {
+    console.log('safeParseJson error:', err.message);
     return null;
   }
 }
@@ -119,11 +120,13 @@ function parseJsonRelaxed(text) {
   try {
     return JSON.parse(sliced);
   } catch (err) {
+    console.log('parseJsonRelaxed first attempt error:', err.message);
     try {
       // remove control characters and retry
       const stripped = sliced.replace(/[\u0000-\u001f]+/g, '');
       return JSON.parse(stripped);
     } catch (err2) {
+      console.log('parseJsonRelaxed second attempt error:', err2.message);
       return null;
     }
   }
@@ -159,9 +162,14 @@ app.get('/health', (_req, res) => {
         { role: 'system', content: analyzeSystemPrompt },
         { role: 'user', content: (assignmentPlain || '').slice(0, 16000) },
       ],
-      maxTokens: 700,
+      maxTokens: 2000,
       responseFormat: 'json_object',
     });
+
+    // Debug: Log full text before parsing
+    console.log('=== FULL LLM TEXT START ===');
+    console.log(llmText);
+    console.log('=== FULL LLM TEXT END ===');
 
     let parsed = safeParseJson(llmText) || parseJsonRelaxed(llmText);
     if (!parsed) {
@@ -169,6 +177,7 @@ app.get('/health', (_req, res) => {
         fallback,
         textLength: llmText?.length || 0,
         snippet: (llmText || '').slice(0, 400),
+        endSnippet: (llmText || '').slice(-200),
       });
       parsed = {
         topics: [
