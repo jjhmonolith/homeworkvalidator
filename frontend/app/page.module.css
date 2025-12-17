@@ -228,10 +228,12 @@
   border: 1px solid var(--stroke);
   border-radius: var(--radius);
   padding: 20px;
+  user-select: none;
 }
 
 .topicHeader {
   margin-bottom: 12px;
+  user-select: none;
 }
 
 .topicList {
@@ -239,6 +241,7 @@
   flex-direction: column;
   gap: 10px;
   margin: 16px 0;
+  user-select: none;
 }
 
 .topicChip {
@@ -246,6 +249,7 @@
   border-radius: 12px;
   border: 1px solid var(--stroke);
   background: rgba(255, 255, 255, 0.02);
+  user-select: none;
 }
 
 .topicChipActive {
