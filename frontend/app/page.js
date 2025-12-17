@@ -574,14 +574,16 @@ function InterviewCard({
         </div>
         <div className={styles.chatInputArea}>
           <textarea
-          value={studentInput}
-          onChange={(e) => {
-            setStudentInput(e.target.value);
-            onTyping();
-          }}
-          placeholder="질문에 대해 자신의 말로 답변해 주세요."
-          disabled={inputDisabled}
-        />
+            value={studentInput}
+            onChange={(e) => {
+              setStudentInput(e.target.value);
+              onTyping();
+            }}
+            onPaste={(e) => e.preventDefault()}
+            onDrop={(e) => e.preventDefault()}
+            placeholder="질문에 대해 자신의 말로 답변해 주세요."
+            disabled={inputDisabled}
+          />
           <div className={styles.chatActions}>
             <button className={styles.primaryButton} onClick={onSend} disabled={inputDisabled}>
               전송
