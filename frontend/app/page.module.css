@@ -333,6 +333,14 @@
   background: rgba(123, 224, 195, 0.08);
   border-color: rgba(123, 224, 195, 0.5);
   align-self: flex-start;
+  user-select: none;
+}
+
+.chatAI,
+.chatAI * {
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
 }
 
 .chatStudent {
