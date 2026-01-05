@@ -70,18 +70,14 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
       for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
-          final += result[0].transcript;
+          final += result[0].transcript + " ";
         } else {
           interim += result[0].transcript;
         }
       }
 
-      if (final) {
-        setTranscript((prev) => prev + final);
-        setInterimTranscript("");
-      } else {
-        setInterimTranscript(interim);
-      }
+      setTranscript(final.trim());
+      setInterimTranscript(interim);
     };
 
     recognitionRef.current = recognition;
