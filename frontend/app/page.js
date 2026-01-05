@@ -181,9 +181,10 @@ export default function Home() {
       excerpt: (assignment.text || "").slice(0, 1500),
       previousQA,
       studentAnswer,
+      interviewMode: interviewMode || "chat",
     });
     return data.question || "주제와 관련된 내용을 더 자세히 설명해 주시겠어요?";
-  }, [assignment.text]);
+  }, [assignment.text, interviewMode]);
 
   const handleUpload = async (file) => {
     if (!file) {
@@ -383,11 +384,12 @@ export default function Home() {
     async (doneTopics) => {
       setPhase("finalizing");
       try {
-        const transcript = buildTranscript(doneTopics);
+        const transcriptText = buildTranscript(doneTopics);
         const data = await apiFetch("/api/summary", {
-          transcript,
+          transcript: transcriptText,
           topics: assignment.topics,
           assignmentText: assignment.text || "",
+          interviewMode: interviewMode || "chat",
         });
         setResultSummary(data.summary);
       } catch (err) {
@@ -398,7 +400,7 @@ export default function Home() {
         setAiGenerating(false);
       }
     },
-    [assignment.topics, assignment.text],
+    [assignment.topics, assignment.text, interviewMode],
   );
 
   const triggerAutoModal = () => {

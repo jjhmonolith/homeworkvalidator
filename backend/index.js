@@ -200,18 +200,29 @@ app.get('/health', (_req, res) => {
 	  }
 	});
 
+const voiceModeAddendum = `
+추가 규칙 (음성 인터뷰 모드):
+- 현재 학생은 음성으로 답변하고 있으며, AI의 질문도 음성으로 읽어주고 있다.
+- 학생에게 "써주세요", "작성해 주세요", "적어주세요" 등 텍스트 작성을 요구하지 않는다.
+- 대신 "말씀해 주세요", "설명해 주세요", "답변해 주세요" 등 구두 응답을 요청한다.
+- 질문은 듣기 쉽고 간결하게 한다. 너무 긴 질문은 피한다.`;
+
 app.post('/api/question', async (req, res) => {
-  const { summary, topic, excerpt, assignmentText, previousQA = [], studentAnswer } = req.body || {};
+  const { summary, topic, excerpt, assignmentText, previousQA = [], studentAnswer, interviewMode } = req.body || {};
   if (!topic) {
     return res.status(400).json({ error: 'topic is required' });
   }
   const docContent = (assignmentText || excerpt || '').slice(0, 14000) || '본문 없음';
   const userContext = `과제 본문(일부):\n${docContent}\n\n현재 주제: ${topic.title}\n${topic.description}\n\n요약(선택):\n${summary || '제공되지 않음'}\n\n이전 Q&A:\n${previousQA.map((turn) => `${turn.role === 'ai' ? 'AI' : '학생'}: ${turn.text}`).join('\n') || '없음'}\n\n학생 최신 답변:\n${studentAnswer || '없음'}`;
 
+  const systemPrompt = interviewMode === 'voice' 
+    ? generateSystemPrompt + voiceModeAddendum 
+    : generateSystemPrompt;
+
   try {
     const { fallback, text } = await runLLM({
       messages: [
-        { role: 'system', content: generateSystemPrompt },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: userContext.slice(0, 15000) },
       ],
       maxTokens: 300,
@@ -224,17 +235,29 @@ app.post('/api/question', async (req, res) => {
   }
 });
 
+const voiceSummaryAddendum = `
+추가 참고 (음성 인터뷰):
+- 이 인터뷰는 음성으로 진행되었다. 학생의 답변은 음성 인식(STT)으로 변환된 텍스트이다.
+- 음성 인식 특성상 오탈자, 띄어쓰기 오류, 동음이의어 오인식이 있을 수 있다. 이를 감안하여 평가한다.
+- 구어체 표현, 말 더듬음, 반복 등은 자연스러운 것이므로 부정적으로 평가하지 않는다.
+- 핵심은 학생이 과제 내용을 이해하고 있는지 여부이다.`;
+
 app.post('/api/summary', async (req, res) => {
-  const { transcript, topics, assignmentText } = req.body || {};
+  const { transcript, topics, assignmentText, interviewMode } = req.body || {};
   if (!transcript) {
     return res.status(400).json({ error: 'transcript is required' });
   }
   const docContent = (assignmentText || '').slice(0, 14000);
   const userContent = `과제 본문(일부):\n${docContent}\n\n주제 목록:\n${(topics || []).map((t) => `${t.title}: ${t.description}`).join('\n')}\n\n대화 로그:\n${transcript}`;
+  
+  const systemPrompt = interviewMode === 'voice'
+    ? summarizeSystemPrompt + voiceSummaryAddendum
+    : summarizeSystemPrompt;
+
   try {
     const { fallback, text } = await runLLM({
       messages: [
-        { role: 'system', content: summarizeSystemPrompt },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: userContent.slice(0, 15000) },
       ],
       maxTokens: 2000,

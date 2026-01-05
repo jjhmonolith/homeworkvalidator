@@ -11,6 +11,7 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
 
   const recognitionRef = useRef(null);
   const shouldRestartRef = useRef(false);
+  const accumulatedRef = useRef("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -55,7 +56,7 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
       }
       setIsListening(false);
       if (event.error === "no-speech") {
-        setError("음성이 감지되지 않았습니다. 다시 시도해 주세요.");
+        return;
       } else if (event.error === "not-allowed") {
         setError("마이크 권한이 필요합니다. 브라우저 설정에서 허용해 주세요.");
       } else if (event.error !== "aborted") {
@@ -64,20 +65,25 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
     };
 
     recognition.onresult = (event) => {
-      let final = "";
+      let sessionFinal = "";
       let interim = "";
 
       for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
-          final += result[0].transcript + " ";
+          sessionFinal += result[0].transcript + " ";
         } else {
           interim += result[0].transcript;
         }
       }
 
-      setTranscript(final.trim());
+      const fullTranscript = (accumulatedRef.current + " " + sessionFinal).trim();
+      setTranscript(fullTranscript);
       setInterimTranscript(interim);
+      
+      if (sessionFinal) {
+        accumulatedRef.current = fullTranscript;
+      }
     };
 
     recognitionRef.current = recognition;
@@ -91,6 +97,7 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
   const startListening = useCallback(() => {
     if (!recognitionRef.current) return;
     shouldRestartRef.current = true;
+    accumulatedRef.current = "";
     setTranscript("");
     setInterimTranscript("");
     setError(null);
