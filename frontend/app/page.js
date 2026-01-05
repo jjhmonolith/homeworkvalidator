@@ -145,7 +145,7 @@ export default function Home() {
 
     const shouldTick =
       modal?.type === "manual-exit" ||
-      ((isTyping || currentTopic.started) && !aiGenerating && modal?.type !== "auto-exit");
+      ((isTyping || currentTopic.started) && !aiGenerating && !isSpeaking && modal?.type !== "auto-exit");
     if (!shouldTick) return;
 
     const timer = setInterval(() => {
@@ -160,7 +160,7 @@ export default function Home() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [phase, currentTopicIndex, currentTopic, isTyping, aiGenerating, modal]);
+  }, [phase, currentTopicIndex, currentTopic, isTyping, aiGenerating, isSpeaking, modal]);
 
   useEffect(() => {
     if (phase !== "interview") return;
@@ -670,6 +670,8 @@ function InterviewCard({
                 ? "종료 확인 중에도 시간이 흘러요"
                 : aiGenerating
                 ? "AI 생성중: 타이머 일시정지"
+                : isSpeaking
+                ? "AI 발화중: 타이머 일시정지"
                 : "입력 중에만 시간이 차감됩니다"}
             </p>
           </div>
@@ -679,56 +681,80 @@ function InterviewCard({
         </div>
       </div>
 
-      <div className={styles.chatPanel}>
-        <div className={styles.chatHeader}>
-          <span>인터뷰 대화</span>
-          <span className={styles.badgeSecondary}>3분 제한 · 역방향 이동 불가</span>
-        </div>
-        <div className={styles.chatBody}>
-          {topic.turns.map((turn, idx) => (
-            <div
-              key={idx}
-              className={clsx(styles.chatBubble, turn.role === "ai" ? styles.chatAI : styles.chatStudent)}
-            >
-              <p className={styles.chatSender}>{turn.role === "ai" ? "AI" : "학생"}</p>
-              <p>{turn.text}</p>
-            </div>
-          ))}
-          {aiGenerating && (
-            <div className={clsx(styles.chatBubble, styles.chatAI)}>
-              <p className={styles.chatSender}>AI</p>
-              <p className={styles.typingDots}>
-                <span />
-                <span />
-                <span />
-              </p>
-            </div>
-          )}
-        </div>
-        {isVoiceMode ? (
-          <div className={styles.voiceInputArea}>
-            {speechError && <div className={styles.speechError}>{speechError}</div>}
-            <div className={styles.voiceTranscript}>
-              {studentInput || interimTranscript || (
-                <span className={styles.voicePlaceholder}>
-                  {isListening ? "듣고 있습니다..." : "마이크 버튼을 눌러 답변하세요"}
-                </span>
-              )}
-              {interimTranscript && <span className={styles.interimText}>{interimTranscript}</span>}
-            </div>
-            <div className={styles.voiceActions}>
-              <button
-                className={clsx(styles.micButton, isListening && styles.micButtonActive)}
-                onClick={onToggleListening}
-                disabled={inputDisabled || aiGenerating}
-              >
-                {isListening ? "⏹️" : "🎤"}
-              </button>
-              {isSpeaking && <span className={styles.speakingIndicator}>🔊 AI 발화중</span>}
-              <span className={styles.timerMicro}>{timeText}</span>
-            </div>
+      {isVoiceMode ? (
+        <div className={styles.voicePanel}>
+          <div className={styles.voiceHeader}>
+            <span>음성 인터뷰</span>
+            <span className={styles.badgeSecondary}>3분 제한 · 음성으로만 답변</span>
           </div>
-        ) : (
+          <div className={styles.voiceQuestionArea}>
+            {aiGenerating ? (
+              <div className={styles.voiceGenerating}>
+                <div className={styles.typingDots}>
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <p>AI가 질문을 준비하고 있습니다...</p>
+              </div>
+            ) : (
+              <>
+                <p className={styles.voiceQuestionLabel}>AI 질문</p>
+                <p className={styles.voiceQuestionText}>
+                  {topic.turns.filter((t) => t.role === "ai").slice(-1)[0]?.text || "질문을 준비중입니다..."}
+                </p>
+                {isSpeaking && <span className={styles.speakingIndicator}>🔊 읽는 중...</span>}
+              </>
+            )}
+          </div>
+          <div className={styles.voiceResponseArea}>
+            {speechError && <div className={styles.speechError}>{speechError}</div>}
+            <div className={styles.voiceStatus}>
+              {isListening ? (
+                <p className={styles.voiceListening}>🎙️ 듣고 있습니다...</p>
+              ) : (
+                <p className={styles.voiceReady}>마이크 버튼을 눌러 답변하세요</p>
+              )}
+              {(studentInput || interimTranscript) && (
+                <p className={styles.voiceTranscriptText}>{studentInput || interimTranscript}</p>
+              )}
+            </div>
+            <button
+              className={clsx(styles.micButtonLarge, isListening && styles.micButtonLargeActive)}
+              onClick={onToggleListening}
+              disabled={inputDisabled || aiGenerating}
+            >
+              {isListening ? "⏹️" : "🎤"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className={styles.chatPanel}>
+          <div className={styles.chatHeader}>
+            <span>인터뷰 대화</span>
+            <span className={styles.badgeSecondary}>3분 제한 · 역방향 이동 불가</span>
+          </div>
+          <div className={styles.chatBody}>
+            {topic.turns.map((turn, idx) => (
+              <div
+                key={idx}
+                className={clsx(styles.chatBubble, turn.role === "ai" ? styles.chatAI : styles.chatStudent)}
+              >
+                <p className={styles.chatSender}>{turn.role === "ai" ? "AI" : "학생"}</p>
+                <p>{turn.text}</p>
+              </div>
+            ))}
+            {aiGenerating && (
+              <div className={clsx(styles.chatBubble, styles.chatAI)}>
+                <p className={styles.chatSender}>AI</p>
+                <p className={styles.typingDots}>
+                  <span />
+                  <span />
+                  <span />
+                </p>
+              </div>
+            )}
+          </div>
           <div className={styles.chatInputArea}>
             <textarea
               value={studentInput}
@@ -748,8 +774,8 @@ function InterviewCard({
               <span className={styles.timerMicro}>{timeText}</span>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {modal?.type && (
         <div className={styles.modalOverlay}>

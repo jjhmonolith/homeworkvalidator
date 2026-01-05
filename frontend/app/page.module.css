@@ -712,6 +712,127 @@
   font-size: 14px;
 }
 
+.voicePanel {
+  background: rgba(13, 20, 34, 0.95);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+}
+
+.voiceHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  color: var(--muted);
+}
+
+.voiceQuestionArea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  background: rgba(123, 224, 195, 0.04);
+  text-align: center;
+}
+
+.voiceQuestionLabel {
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-bottom: 16px;
+}
+
+.voiceQuestionText {
+  font-size: 20px;
+  line-height: 1.6;
+  color: var(--text);
+  max-width: 500px;
+}
+
+.voiceGenerating {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  color: var(--muted);
+}
+
+.voiceResponseArea {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.voiceStatus {
+  text-align: center;
+  min-height: 60px;
+}
+
+.voiceListening {
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 600;
+  animation: fadeInOut 1s ease-in-out infinite;
+}
+
+.voiceReady {
+  color: var(--muted);
+  font-size: 16px;
+}
+
+.voiceTranscriptText {
+  margin-top: 8px;
+  padding: 12px 20px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--stroke);
+  color: var(--text);
+  font-size: 15px;
+  max-width: 400px;
+}
+
+.micButtonLarge {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 3px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 36px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.micButtonLarge:hover:not(:disabled) {
+  border-color: rgba(123, 224, 195, 0.7);
+  background: rgba(123, 224, 195, 0.1);
+  transform: scale(1.05);
+}
+
+.micButtonLarge:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.micButtonLargeActive {
+  border-color: var(--danger);
+  background: rgba(255, 107, 107, 0.15);
+  animation: micPulse 1.5s ease-in-out infinite;
+}
+
 @media (max-width: 640px) {
   .modeSelectGrid {
     grid-template-columns: 1fr;
@@ -721,5 +842,15 @@
     width: 56px;
     height: 56px;
     font-size: 24px;
+  }
+
+  .micButtonLarge {
+    width: 70px;
+    height: 70px;
+    font-size: 32px;
+  }
+
+  .voiceQuestionText {
+    font-size: 18px;
   }
 }

@@ -255,6 +255,32 @@ app.post('/api/summary', async (req, res) => {
   }
 });
 
+app.post('/api/tts', async (req, res) => {
+  const { text } = req.body || {};
+  if (!text) {
+    return res.status(400).json({ error: 'text is required' });
+  }
+  if (!openai) {
+    return res.status(503).json({ error: 'OpenAI API not configured' });
+  }
+  try {
+    const mp3 = await openai.audio.speech.create({
+      model: 'tts-1',
+      voice: 'nova',
+      input: text.slice(0, 4096),
+    });
+    const buffer = Buffer.from(await mp3.arrayBuffer());
+    res.set({
+      'Content-Type': 'audio/mpeg',
+      'Content-Length': buffer.length,
+    });
+    res.send(buffer);
+  } catch (err) {
+    console.error('tts error', err);
+    return res.status(500).json({ error: 'tts_failed' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Backend listening on port ${PORT}`);
 });
