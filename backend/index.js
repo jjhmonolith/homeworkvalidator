@@ -237,7 +237,7 @@ app.post('/api/summary', async (req, res) => {
         { role: 'system', content: summarizeSystemPrompt },
         { role: 'user', content: userContent.slice(0, 15000) },
       ],
-      maxTokens: 600,
+      maxTokens: 2000,
       responseFormat: 'json_object',
     });
     let parsed = safeParseJson(text) || parseJsonRelaxed(text);

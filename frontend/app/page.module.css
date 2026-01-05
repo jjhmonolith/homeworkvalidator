@@ -833,6 +833,34 @@
   animation: micPulse 1.5s ease-in-out infinite;
 }
 
+.micButtonStop {
+  width: auto;
+  height: auto;
+  padding: 16px 32px;
+  border-radius: 16px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  border-color: var(--danger);
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.micButtonStop:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: rgba(255, 107, 107, 0.2);
+}
+
+.speakingIndicatorLarge {
+  font-size: 64px;
+  animation: fadeInOut 1s ease-in-out infinite;
+}
+
+.listeningIndicatorLarge {
+  font-size: 64px;
+  color: var(--accent);
+  animation: micPulse 1.5s ease-in-out infinite;
+}
+
 @media (max-width: 640px) {
   .modeSelectGrid {
     grid-template-columns: 1fr;

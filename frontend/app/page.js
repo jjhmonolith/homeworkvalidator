@@ -81,6 +81,7 @@ export default function Home() {
   const [autoCountdown, setAutoCountdown] = useState(AUTO_ADVANCE_SECONDS);
   const [advancing, setAdvancing] = useState(false);
   const [interviewMode, setInterviewMode] = useState(null);
+  const [turnSubmitted, setTurnSubmitted] = useState(false);
 
   const currentTopic = topicsState[currentTopicIndex];
 
@@ -93,7 +94,7 @@ export default function Home() {
     startListening,
     stopListening,
     resetTranscript,
-  } = useSpeechRecognition({ lang: "ko-KR" });
+  } = useSpeechRecognition({ lang: "ko-KR", continuous: true });
 
   const {
     isSpeaking,
@@ -108,8 +109,8 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [isTyping]);
 
-  const handleVoiceSendRef = useRef(null);
   const prevTurnsLengthRef = useRef(0);
+  const prevSpeakingRef = useRef(false);
 
   useEffect(() => {
     if (interviewMode === "voice" && transcript) {
@@ -118,25 +119,24 @@ export default function Home() {
   }, [interviewMode, transcript]);
 
   useEffect(() => {
-    if (interviewMode === "voice" && !isListening && transcript) {
-      const timer = setTimeout(() => {
-        if (transcript.trim() && handleVoiceSendRef.current) {
-          handleVoiceSendRef.current();
-        }
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [isListening, transcript, interviewMode]);
-
-  useEffect(() => {
     if (interviewMode !== "voice" || aiGenerating) return;
     const turns = currentTopic?.turns || [];
     const lastTurn = turns[turns.length - 1];
     if (turns.length > prevTurnsLengthRef.current && lastTurn?.role === "ai") {
+      setTurnSubmitted(false);
       speak(lastTurn.text);
     }
     prevTurnsLengthRef.current = turns.length;
   }, [currentTopic?.turns, interviewMode, aiGenerating, speak]);
+
+  useEffect(() => {
+    if (interviewMode !== "voice") return;
+    if (prevSpeakingRef.current && !isSpeaking && !turnSubmitted && !aiGenerating) {
+      resetTranscript();
+      startListening();
+    }
+    prevSpeakingRef.current = isSpeaking;
+  }, [isSpeaking, interviewMode, turnSubmitted, aiGenerating, resetTranscript, startListening]);
 
   useEffect(() => {
     if (phase !== "interview") return;
@@ -324,9 +324,24 @@ export default function Home() {
     }
   };
 
-  const handleVoiceSend = useCallback(async () => {
-    if (!transcript.trim() || !currentTopic) return;
+  const handleVoiceSubmit = useCallback(async () => {
+    if (turnSubmitted || !currentTopic) return;
+    stopListening();
+    setTurnSubmitted(true);
+    
     const message = transcript.trim();
+    if (!message) {
+      setTopicsState((prev) =>
+        prev.map((t, idx) => {
+          if (idx === currentTopicIndex) {
+            return { ...t, turns: [...(t.turns || []), { role: "student", text: "(응답 없음)" }] };
+          }
+          return t;
+        }),
+      );
+    }
+    
+    const studentResponse = message || "(응답 없음)";
     resetTranscript();
     setStudentInput("");
 
@@ -334,7 +349,7 @@ export default function Home() {
     setTopicsState((prev) =>
       prev.map((t, idx) => {
         if (idx === currentTopicIndex) {
-          nextTurns = [...(t.turns || []), { role: "student", text: message }];
+          nextTurns = [...(t.turns || []), { role: "student", text: studentResponse }];
           return { ...t, turns: nextTurns };
         }
         return t;
@@ -346,7 +361,7 @@ export default function Home() {
       const question = await fetchQuestion({
         topic: currentTopic,
         previousQA: nextTurns,
-        studentAnswer: message,
+        studentAnswer: studentResponse,
       });
       setTopicsState((prev) =>
         prev.map((t, idx) => {
@@ -362,21 +377,7 @@ export default function Home() {
     } finally {
       setAiGenerating(false);
     }
-  }, [transcript, currentTopic, currentTopicIndex, resetTranscript, fetchQuestion]);
-
-  useEffect(() => {
-    handleVoiceSendRef.current = handleVoiceSend;
-  }, [handleVoiceSend]);
-
-  const toggleListening = () => {
-    if (isListening) {
-      stopListening();
-    } else {
-      stopSpeaking();
-      resetTranscript();
-      startListening();
-    }
-  };
+  }, [turnSubmitted, transcript, currentTopic, currentTopicIndex, stopListening, resetTranscript, fetchQuestion]);
 
   const finalizeSession = useCallback(
     async (doneTopics) => {
@@ -413,6 +414,9 @@ export default function Home() {
       setAiGenerating(false);
       setIsTyping(false);
       setStudentInput("");
+      stopSpeaking();
+      stopListening();
+      resetTranscript();
 
       let updated = topicsState;
       setTopicsState((prev) => {
@@ -432,7 +436,7 @@ export default function Home() {
       }
       setAdvancing(false);
     },
-    [advancing, topicsState, currentTopicIndex, assignment.text, prepareTopic, finalizeSession],
+    [advancing, topicsState, currentTopicIndex, assignment.text, prepareTopic, finalizeSession, stopSpeaking, stopListening, resetTranscript],
   );
 
   useEffect(() => {
@@ -464,6 +468,7 @@ export default function Home() {
     setResultSummary(null);
     setAdvancing(false);
     setInterviewMode(null);
+    setTurnSubmitted(false);
     resetTranscript();
     stopSpeaking();
   };
@@ -533,7 +538,8 @@ export default function Home() {
           interimTranscript={interimTranscript}
           isSpeaking={isSpeaking}
           speechError={speechError}
-          onToggleListening={toggleListening}
+          turnSubmitted={turnSubmitted}
+          onVoiceSubmit={handleVoiceSubmit}
         />
       )}
       {phase === "finalizing" && (
@@ -634,7 +640,8 @@ function InterviewCard({
   interimTranscript,
   isSpeaking,
   speechError,
-  onToggleListening,
+  turnSubmitted,
+  onVoiceSubmit,
 }) {
   const isVoiceMode = interviewMode === "voice";
   return (
@@ -697,34 +704,33 @@ function InterviewCard({
                 </div>
                 <p>AI가 질문을 준비하고 있습니다...</p>
               </div>
+            ) : isSpeaking ? (
+              <div className={styles.voiceGenerating}>
+                <span className={styles.speakingIndicatorLarge}>🔊</span>
+                <p>AI가 질문을 읽고 있습니다...</p>
+              </div>
+            ) : turnSubmitted ? (
+              <div className={styles.voiceGenerating}>
+                <p>답변이 제출되었습니다. 다음 질문을 기다려주세요.</p>
+              </div>
             ) : (
-              <>
-                <p className={styles.voiceQuestionLabel}>AI 질문</p>
-                <p className={styles.voiceQuestionText}>
-                  {topic.turns.filter((t) => t.role === "ai").slice(-1)[0]?.text || "질문을 준비중입니다..."}
-                </p>
-                {isSpeaking && <span className={styles.speakingIndicator}>🔊 읽는 중...</span>}
-              </>
+              <div className={styles.voiceGenerating}>
+                <span className={styles.listeningIndicatorLarge}>🎙️</span>
+                <p>답변해주세요. 완료되면 아래 버튼을 누르세요.</p>
+              </div>
             )}
           </div>
           <div className={styles.voiceResponseArea}>
             {speechError && <div className={styles.speechError}>{speechError}</div>}
-            <div className={styles.voiceStatus}>
-              {isListening ? (
-                <p className={styles.voiceListening}>🎙️ 듣고 있습니다...</p>
-              ) : (
-                <p className={styles.voiceReady}>마이크 버튼을 눌러 답변하세요</p>
-              )}
-              {(studentInput || interimTranscript) && (
-                <p className={styles.voiceTranscriptText}>{studentInput || interimTranscript}</p>
-              )}
-            </div>
+            {isListening && (studentInput || interimTranscript) && (
+              <p className={styles.voiceTranscriptText}>{studentInput || interimTranscript}</p>
+            )}
             <button
-              className={clsx(styles.micButtonLarge, isListening && styles.micButtonLargeActive)}
-              onClick={onToggleListening}
-              disabled={inputDisabled || aiGenerating}
+              className={clsx(styles.micButtonLarge, styles.micButtonStop)}
+              onClick={onVoiceSubmit}
+              disabled={inputDisabled || aiGenerating || isSpeaking || turnSubmitted}
             >
-              {isListening ? "⏹️" : "🎤"}
+              ⏹️ 답변 완료
             </button>
           </div>
         </div>

@@ -10,6 +10,7 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
   const [isSupported, setIsSupported] = useState(false);
 
   const recognitionRef = useRef(null);
+  const shouldRestartRef = useRef(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -32,16 +33,32 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
     };
 
     recognition.onend = () => {
-      setIsListening(false);
+      if (shouldRestartRef.current && continuous) {
+        try {
+          recognition.start();
+        } catch (err) {
+          setIsListening(false);
+        }
+      } else {
+        setIsListening(false);
+      }
     };
 
     recognition.onerror = (event) => {
+      if (event.error === "no-speech" && continuous && shouldRestartRef.current) {
+        try {
+          recognition.start();
+        } catch (err) {
+          setIsListening(false);
+        }
+        return;
+      }
       setIsListening(false);
       if (event.error === "no-speech") {
         setError("음성이 감지되지 않았습니다. 다시 시도해 주세요.");
       } else if (event.error === "not-allowed") {
         setError("마이크 권한이 필요합니다. 브라우저 설정에서 허용해 주세요.");
-      } else {
+      } else if (event.error !== "aborted") {
         setError(`음성 인식 오류: ${event.error}`);
       }
     };
@@ -70,12 +87,14 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
     recognitionRef.current = recognition;
 
     return () => {
+      shouldRestartRef.current = false;
       recognition.abort();
     };
   }, [lang, continuous]);
 
   const startListening = useCallback(() => {
     if (!recognitionRef.current) return;
+    shouldRestartRef.current = true;
     setTranscript("");
     setInterimTranscript("");
     setError(null);
@@ -88,6 +107,7 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
 
   const stopListening = useCallback(() => {
     if (!recognitionRef.current) return;
+    shouldRestartRef.current = false;
     recognitionRef.current.stop();
   }, []);
 
