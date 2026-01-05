@@ -12,6 +12,7 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
   const recognitionRef = useRef(null);
   const shouldRestartRef = useRef(false);
   const accumulatedRef = useRef("");
+  const sessionFinalRef = useRef("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -34,6 +35,11 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
     };
 
     recognition.onend = () => {
+      if (sessionFinalRef.current) {
+        accumulatedRef.current = (accumulatedRef.current + " " + sessionFinalRef.current).trim();
+        sessionFinalRef.current = "";
+      }
+      
       if (shouldRestartRef.current && continuous) {
         try {
           recognition.start();
@@ -77,13 +83,10 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
         }
       }
 
+      sessionFinalRef.current = sessionFinal.trim();
       const fullTranscript = (accumulatedRef.current + " " + sessionFinal).trim();
       setTranscript(fullTranscript);
       setInterimTranscript(interim);
-      
-      if (sessionFinal) {
-        accumulatedRef.current = fullTranscript;
-      }
     };
 
     recognitionRef.current = recognition;
@@ -98,6 +101,7 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
     if (!recognitionRef.current) return;
     shouldRestartRef.current = true;
     accumulatedRef.current = "";
+    sessionFinalRef.current = "";
     setTranscript("");
     setInterimTranscript("");
     setError(null);
