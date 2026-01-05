@@ -91,6 +91,7 @@ export default function Home() {
     interimTranscript,
     error: speechError,
     isSupported: sttSupported,
+    volumeLevel,
     startListening,
     stopListening,
     resetTranscript,
@@ -118,16 +119,39 @@ export default function Home() {
     }
   }, [interviewMode, transcript]);
 
+  const prevTopicIndexRef = useRef(currentTopicIndex);
+  const phaseRef = useRef(phase);
+  const topicIndexRef = useRef(currentTopicIndex);
+
   useEffect(() => {
-    if (interviewMode !== "voice" || aiGenerating) return;
+    phaseRef.current = phase;
+  }, [phase]);
+
+  useEffect(() => {
+    topicIndexRef.current = currentTopicIndex;
+  }, [currentTopicIndex]);
+
+  useEffect(() => {
+    if (currentTopicIndex !== prevTopicIndexRef.current) {
+      prevTurnsLengthRef.current = 0;
+      prevTopicIndexRef.current = currentTopicIndex;
+      stopSpeaking();
+    }
+  }, [currentTopicIndex, stopSpeaking]);
+
+  useEffect(() => {
+    if (interviewMode !== "voice" || aiGenerating || phase !== "interview") return;
     const turns = currentTopic?.turns || [];
     const lastTurn = turns[turns.length - 1];
     if (turns.length > prevTurnsLengthRef.current && lastTurn?.role === "ai") {
       setTurnSubmitted(false);
-      speak(lastTurn.text);
+      const expectedTopicIndex = currentTopicIndex;
+      speak(lastTurn.text, () => {
+        return phaseRef.current === "interview" && topicIndexRef.current === expectedTopicIndex;
+      });
     }
     prevTurnsLengthRef.current = turns.length;
-  }, [currentTopic?.turns, interviewMode, aiGenerating, speak]);
+  }, [currentTopic?.turns, interviewMode, aiGenerating, phase, currentTopicIndex, speak, stopSpeaking]);
 
   useEffect(() => {
     if (interviewMode !== "voice") return;
@@ -541,6 +565,7 @@ export default function Home() {
           isSpeaking={isSpeaking}
           speechError={speechError}
           turnSubmitted={turnSubmitted}
+          volumeLevel={volumeLevel}
           onVoiceSubmit={handleVoiceSubmit}
         />
       )}
@@ -643,9 +668,11 @@ function InterviewCard({
   isSpeaking,
   speechError,
   turnSubmitted,
+  volumeLevel,
   onVoiceSubmit,
 }) {
   const isVoiceMode = interviewMode === "voice";
+  const volumeScale = 1 + volumeLevel * 0.5;
   return (
     <div className={styles.interviewGrid}>
       <div className={styles.topicPanel}>
@@ -717,8 +744,13 @@ function InterviewCard({
               </div>
             ) : (
               <div className={styles.voiceGenerating}>
-                <span className={styles.listeningIndicatorLarge}>🎙️</span>
-                <p>답변해주세요. 완료되면 아래 버튼을 누르세요.</p>
+                <div 
+                  className={styles.volumeIndicator}
+                  style={{ transform: `scale(${volumeScale})` }}
+                >
+                  <span className={styles.volumeInner}>🎙️</span>
+                </div>
+                <p>{isListening ? "듣고 있습니다..." : "마이크 준비 중..."}</p>
               </div>
             )}
           </div>

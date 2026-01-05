@@ -8,11 +8,16 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
   const [interimTranscript, setInterimTranscript] = useState("");
   const [error, setError] = useState(null);
   const [isSupported, setIsSupported] = useState(false);
+  const [volumeLevel, setVolumeLevel] = useState(0);
 
   const recognitionRef = useRef(null);
   const shouldRestartRef = useRef(false);
   const accumulatedRef = useRef("");
   const sessionFinalRef = useRef("");
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const mediaStreamRef = useRef(null);
+  const animationFrameRef = useRef(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -97,6 +102,53 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
     };
   }, [lang, continuous]);
 
+  const startVolumeMonitoring = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      audioContextRef.current = audioContext;
+      
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+      
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      
+      const updateVolume = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        const normalized = Math.min(average / 128, 1);
+        setVolumeLevel(normalized);
+        animationFrameRef.current = requestAnimationFrame(updateVolume);
+      };
+      updateVolume();
+    } catch (err) {
+      console.warn("Volume monitoring not available");
+    }
+  }, []);
+
+  const stopVolumeMonitoring = useCallback(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+    setVolumeLevel(0);
+  }, []);
+
   const startListening = useCallback(() => {
     if (!recognitionRef.current) return;
     shouldRestartRef.current = true;
@@ -105,18 +157,20 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
     setTranscript("");
     setInterimTranscript("");
     setError(null);
+    startVolumeMonitoring();
     try {
       recognitionRef.current.start();
     } catch (err) {
       console.warn("Speech recognition already started");
     }
-  }, []);
+  }, [startVolumeMonitoring]);
 
   const stopListening = useCallback(() => {
     if (!recognitionRef.current) return;
     shouldRestartRef.current = false;
     recognitionRef.current.stop();
-  }, []);
+    stopVolumeMonitoring();
+  }, [stopVolumeMonitoring]);
 
   const resetTranscript = useCallback(() => {
     setTranscript("");
@@ -129,6 +183,7 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
     interimTranscript,
     error,
     isSupported,
+    volumeLevel,
     startListening,
     stopListening,
     resetTranscript,
@@ -142,8 +197,9 @@ export function useSpeechSynthesis() {
   const [isSupported] = useState(true);
   const audioRef = useRef(null);
   const abortControllerRef = useRef(null);
+  const requestIdRef = useRef(0);
 
-  const speak = useCallback(async (text) => {
+  const speak = useCallback(async (text, validationFn) => {
     if (!text) return;
 
     if (abortControllerRef.current) {
@@ -154,6 +210,7 @@ export function useSpeechSynthesis() {
       audioRef.current = null;
     }
 
+    const currentRequestId = ++requestIdRef.current;
     abortControllerRef.current = new AbortController();
     setIsSpeaking(true);
 
@@ -165,11 +222,32 @@ export function useSpeechSynthesis() {
         signal: abortControllerRef.current.signal,
       });
 
+      if (currentRequestId !== requestIdRef.current) {
+        setIsSpeaking(false);
+        return;
+      }
+
+      if (validationFn && !validationFn()) {
+        setIsSpeaking(false);
+        return;
+      }
+
       if (!response.ok) {
         throw new Error("TTS request failed");
       }
 
       const blob = await response.blob();
+      
+      if (currentRequestId !== requestIdRef.current) {
+        setIsSpeaking(false);
+        return;
+      }
+
+      if (validationFn && !validationFn()) {
+        setIsSpeaking(false);
+        return;
+      }
+
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
@@ -193,6 +271,7 @@ export function useSpeechSynthesis() {
   }, []);
 
   const stop = useCallback(() => {
+    requestIdRef.current++;
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
