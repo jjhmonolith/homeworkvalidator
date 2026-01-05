@@ -537,3 +537,189 @@
     text-align: center;
   }
 }
+
+.modeSelectGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-top: 8px;
+}
+
+.modeCard {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  padding: 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modeCard:hover:not(.modeCardDisabled) {
+  border-color: rgba(123, 224, 195, 0.7);
+  background: rgba(123, 224, 195, 0.04);
+  transform: translateY(-2px);
+}
+
+.modeCardDisabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modeIcon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.modeTitle {
+  font-size: 18px;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.modeDescription {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.topicPreview {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--stroke);
+}
+
+.topicPreviewList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.topicPreviewChip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 14px;
+}
+
+.topicPreviewNumber {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(123, 224, 195, 0.15);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.voiceInputArea {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.voiceTranscript {
+  min-height: 100px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.voicePlaceholder {
+  color: var(--muted);
+}
+
+.interimText {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.voiceActions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.micButton {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 28px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.micButton:hover:not(:disabled) {
+  border-color: rgba(123, 224, 195, 0.7);
+  background: rgba(123, 224, 195, 0.1);
+}
+
+.micButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.micButtonActive {
+  border-color: var(--danger);
+  background: rgba(255, 107, 107, 0.15);
+  animation: micPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes micPulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 12px rgba(255, 107, 107, 0);
+  }
+}
+
+.speakingIndicator {
+  color: var(--accent);
+  font-size: 14px;
+  animation: fadeInOut 1s ease-in-out infinite;
+}
+
+@keyframes fadeInOut {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+.speechError {
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(255, 107, 107, 0.1);
+  border: 1px solid rgba(255, 107, 107, 0.3);
+  color: #ffdede;
+  font-size: 14px;
+}
+
+@media (max-width: 640px) {
+  .modeSelectGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .micButton {
+    width: 56px;
+    height: 56px;
+    font-size: 24px;
+  }
+}

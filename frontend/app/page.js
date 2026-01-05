@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import clsx from "clsx";
 import styles from "./page.module.css";
+import { useSpeechRecognition, useSpeechSynthesis } from "./hooks/useSpeech";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4010";
 const TOPIC_SECONDS = 180;
@@ -11,6 +12,7 @@ const AUTO_ADVANCE_SECONDS = 5;
 const phaseLabels = {
   upload: "과제 업로드",
   analyzing: "과제 분석중",
+  modeSelect: "인터뷰 방식 선택",
   prep: "인터뷰 준비중",
   interview: "인터뷰 진행중",
   finalizing: "결과 분석중",
@@ -78,14 +80,63 @@ export default function Home() {
   const [modal, setModal] = useState(null);
   const [autoCountdown, setAutoCountdown] = useState(AUTO_ADVANCE_SECONDS);
   const [advancing, setAdvancing] = useState(false);
+  const [interviewMode, setInterviewMode] = useState(null);
 
   const currentTopic = topicsState[currentTopicIndex];
+
+  const {
+    isListening,
+    transcript,
+    interimTranscript,
+    error: speechError,
+    isSupported: sttSupported,
+    startListening,
+    stopListening,
+    resetTranscript,
+  } = useSpeechRecognition({ lang: "ko-KR" });
+
+  const {
+    isSpeaking,
+    isSupported: ttsSupported,
+    speak,
+    stop: stopSpeaking,
+  } = useSpeechSynthesis({ lang: "ko-KR", rate: 0.95 });
 
   useEffect(() => {
     if (!isTyping) return;
     const timer = setTimeout(() => setIsTyping(false), 5000);
     return () => clearTimeout(timer);
   }, [isTyping]);
+
+  const handleVoiceSendRef = useRef(null);
+  const prevTurnsLengthRef = useRef(0);
+
+  useEffect(() => {
+    if (interviewMode === "voice" && transcript) {
+      setStudentInput(transcript);
+    }
+  }, [interviewMode, transcript]);
+
+  useEffect(() => {
+    if (interviewMode === "voice" && !isListening && transcript) {
+      const timer = setTimeout(() => {
+        if (transcript.trim() && handleVoiceSendRef.current) {
+          handleVoiceSendRef.current();
+        }
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [isListening, transcript, interviewMode]);
+
+  useEffect(() => {
+    if (interviewMode !== "voice" || aiGenerating) return;
+    const turns = currentTopic?.turns || [];
+    const lastTurn = turns[turns.length - 1];
+    if (turns.length > prevTurnsLengthRef.current && lastTurn?.role === "ai") {
+      speak(lastTurn.text);
+    }
+    prevTurnsLengthRef.current = turns.length;
+  }, [currentTopic?.turns, interviewMode, aiGenerating, speak]);
 
   useEffect(() => {
     if (phase !== "interview") return;
@@ -123,7 +174,7 @@ export default function Home() {
 
   const inputDisabled = phase !== "interview" || aiGenerating || modal?.type === "auto-exit";
 
-  const fetchQuestion = async ({ topic, previousQA, studentAnswer }) => {
+  const fetchQuestion = useCallback(async ({ topic, previousQA, studentAnswer }) => {
     const data = await apiFetch("/api/question", {
       topic,
       assignmentText: assignment.text || "",
@@ -132,7 +183,7 @@ export default function Home() {
       studentAnswer,
     });
     return data.question || "주제와 관련된 내용을 더 자세히 설명해 주시겠어요?";
-  };
+  }, [assignment.text]);
 
   const handleUpload = async (file) => {
     if (!file) {
@@ -161,12 +212,17 @@ export default function Home() {
       setAssignment({ topics: normalizedTopics, text: data.text || "" });
       setTopicsState(normalizedTopics);
       setCurrentTopicIndex(0);
-      await prepareTopic(0, normalizedTopics, data.text || "");
+      setPhase("modeSelect");
     } catch (err) {
       console.error(err);
       setError(err.message || "업로드에 실패했습니다.");
       setPhase("upload");
     }
+  };
+
+  const handleModeSelect = async (mode) => {
+    setInterviewMode(mode);
+    await prepareTopic(0, topicsState, assignment.text || "");
   };
 
   const prepareTopic = useCallback(async (index, nextTopics, text) => {
@@ -268,6 +324,60 @@ export default function Home() {
     }
   };
 
+  const handleVoiceSend = useCallback(async () => {
+    if (!transcript.trim() || !currentTopic) return;
+    const message = transcript.trim();
+    resetTranscript();
+    setStudentInput("");
+
+    let nextTurns = [];
+    setTopicsState((prev) =>
+      prev.map((t, idx) => {
+        if (idx === currentTopicIndex) {
+          nextTurns = [...(t.turns || []), { role: "student", text: message }];
+          return { ...t, turns: nextTurns };
+        }
+        return t;
+      }),
+    );
+
+    setAiGenerating(true);
+    try {
+      const question = await fetchQuestion({
+        topic: currentTopic,
+        previousQA: nextTurns,
+        studentAnswer: message,
+      });
+      setTopicsState((prev) =>
+        prev.map((t, idx) => {
+          if (idx === currentTopicIndex) {
+            return { ...t, turns: [...nextTurns, { role: "ai", text: question }] };
+          }
+          return t;
+        }),
+      );
+    } catch (err) {
+      console.error(err);
+      setError("질문 생성에 실패했습니다. 다시 시도해 주세요.");
+    } finally {
+      setAiGenerating(false);
+    }
+  }, [transcript, currentTopic, currentTopicIndex, resetTranscript, fetchQuestion]);
+
+  useEffect(() => {
+    handleVoiceSendRef.current = handleVoiceSend;
+  }, [handleVoiceSend]);
+
+  const toggleListening = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      stopSpeaking();
+      resetTranscript();
+      startListening();
+    }
+  };
+
   const finalizeSession = useCallback(
     async (doneTopics) => {
       setPhase("finalizing");
@@ -353,6 +463,9 @@ export default function Home() {
     setModal(null);
     setResultSummary(null);
     setAdvancing(false);
+    setInterviewMode(null);
+    resetTranscript();
+    stopSpeaking();
   };
 
   return (
@@ -384,6 +497,13 @@ export default function Home() {
           detail="AI가 과제의 요약과 주제 블록을 만드는 중입니다. 잠시만 기다려 주세요."
         />
       )}
+      {phase === "modeSelect" && (
+        <ModeSelectCard
+          onSelect={handleModeSelect}
+          sttSupported={sttSupported}
+          topics={topicsState}
+        />
+      )}
       {phase === "prep" && (
         <LoadingCard
           label="인터뷰 준비중"
@@ -408,6 +528,12 @@ export default function Home() {
           onCancelExit={() => setModal(null)}
           autoCountdown={autoCountdown}
           inputDisabled={inputDisabled}
+          interviewMode={interviewMode}
+          isListening={isListening}
+          interimTranscript={interimTranscript}
+          isSpeaking={isSpeaking}
+          speechError={speechError}
+          onToggleListening={toggleListening}
         />
       )}
       {phase === "finalizing" && (
@@ -503,7 +629,14 @@ function InterviewCard({
   onCancelExit,
   autoCountdown,
   inputDisabled,
+  interviewMode,
+  isListening,
+  interimTranscript,
+  isSpeaking,
+  speechError,
+  onToggleListening,
 }) {
+  const isVoiceMode = interviewMode === "voice";
   return (
     <div className={styles.interviewGrid}>
       <div className={styles.topicPanel}>
@@ -572,25 +705,50 @@ function InterviewCard({
             </div>
           )}
         </div>
-        <div className={styles.chatInputArea}>
-          <textarea
-            value={studentInput}
-            onChange={(e) => {
-              setStudentInput(e.target.value);
-              onTyping();
-            }}
-            onPaste={(e) => e.preventDefault()}
-            onDrop={(e) => e.preventDefault()}
-            placeholder="질문에 대해 자신의 말로 답변해 주세요."
-            disabled={inputDisabled}
-          />
-          <div className={styles.chatActions}>
-            <button className={styles.primaryButton} onClick={onSend} disabled={inputDisabled}>
-              전송
-            </button>
-            <span className={styles.timerMicro}>{timeText}</span>
+        {isVoiceMode ? (
+          <div className={styles.voiceInputArea}>
+            {speechError && <div className={styles.speechError}>{speechError}</div>}
+            <div className={styles.voiceTranscript}>
+              {studentInput || interimTranscript || (
+                <span className={styles.voicePlaceholder}>
+                  {isListening ? "듣고 있습니다..." : "마이크 버튼을 눌러 답변하세요"}
+                </span>
+              )}
+              {interimTranscript && <span className={styles.interimText}>{interimTranscript}</span>}
+            </div>
+            <div className={styles.voiceActions}>
+              <button
+                className={clsx(styles.micButton, isListening && styles.micButtonActive)}
+                onClick={onToggleListening}
+                disabled={inputDisabled || aiGenerating}
+              >
+                {isListening ? "⏹️" : "🎤"}
+              </button>
+              {isSpeaking && <span className={styles.speakingIndicator}>🔊 AI 발화중</span>}
+              <span className={styles.timerMicro}>{timeText}</span>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className={styles.chatInputArea}>
+            <textarea
+              value={studentInput}
+              onChange={(e) => {
+                setStudentInput(e.target.value);
+                onTyping();
+              }}
+              onPaste={(e) => e.preventDefault()}
+              onDrop={(e) => e.preventDefault()}
+              placeholder="질문에 대해 자신의 말로 답변해 주세요."
+              disabled={inputDisabled}
+            />
+            <div className={styles.chatActions}>
+              <button className={styles.primaryButton} onClick={onSend} disabled={inputDisabled}>
+                전송
+              </button>
+              <span className={styles.timerMicro}>{timeText}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {modal?.type && (
@@ -664,8 +822,57 @@ function ResultCard({ summary, onReset }) {
           </div>
         </div>
       ) : (
-        <p className={styles.cardDescription}>결과를 불러오지 못했습니다. 새 과제로 다시 시작해 주세요.</p>
+        <p className={styles.cardDescription}>결과를 불러오지 못했습니다. 새 과제로 다시 시도해 주세요.</p>
       )}
+    </div>
+  );
+}
+
+function ModeSelectCard({ onSelect, sttSupported, topics }) {
+  return (
+    <div className={styles.card}>
+      <div className={styles.cardHeader}>
+        <div>
+          <p className={styles.cardEyebrow}>STEP 2</p>
+          <h2 className={styles.cardTitle}>인터뷰 방식 선택</h2>
+          <p className={styles.cardDescription}>
+            {topics.length}개 주제에 대해 인터뷰를 진행합니다. 원하는 방식을 선택하세요.
+          </p>
+        </div>
+      </div>
+      <div className={styles.modeSelectGrid}>
+        <button className={styles.modeCard} onClick={() => onSelect("chat")}>
+          <div className={styles.modeIcon}>💬</div>
+          <h3 className={styles.modeTitle}>채팅 인터뷰</h3>
+          <p className={styles.modeDescription}>
+            텍스트로 질문에 답변합니다. 복사/붙여넣기는 차단됩니다.
+          </p>
+        </button>
+        <button
+          className={clsx(styles.modeCard, !sttSupported && styles.modeCardDisabled)}
+          onClick={() => sttSupported && onSelect("voice")}
+          disabled={!sttSupported}
+        >
+          <div className={styles.modeIcon}>🎤</div>
+          <h3 className={styles.modeTitle}>음성 인터뷰</h3>
+          <p className={styles.modeDescription}>
+            {sttSupported
+              ? "마이크로 답변하면 AI가 음성으로 질문합니다."
+              : "이 브라우저는 음성 인식을 지원하지 않습니다. Chrome 또는 Edge를 사용해 주세요."}
+          </p>
+        </button>
+      </div>
+      <div className={styles.topicPreview}>
+        <p className={styles.cardEyebrow}>분석된 주제</p>
+        <div className={styles.topicPreviewList}>
+          {topics.map((t, idx) => (
+            <div key={t.id || idx} className={styles.topicPreviewChip}>
+              <span className={styles.topicPreviewNumber}>{idx + 1}</span>
+              <span>{t.title}</span>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
