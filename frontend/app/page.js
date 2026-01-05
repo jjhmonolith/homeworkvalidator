@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useRef } from "react";
 import clsx from "clsx";
 import styles from "./page.module.css";
-import { useSpeechRecognition, useSpeechSynthesis } from "./hooks/useSpeech";
+import { useWhisperRecognition, useSpeechSynthesis } from "./hooks/useSpeech";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4010";
 const TOPIC_SECONDS = 180;
@@ -34,6 +34,12 @@ function buildTranscript(topics = []) {
         .join("\n"),
     )
     .join("\n");
+}
+
+function buildContextForSTT(assignmentText, turns) {
+  const excerpt = (assignmentText || "").slice(0, 200);
+  const recentQA = (turns || []).slice(-2).map(t => t.text).join(" ");
+  return `${excerpt} ${recentQA}`.trim();
 }
 
 function fileToBase64(file) {
@@ -87,15 +93,15 @@ export default function Home() {
 
   const {
     isListening,
+    isTranscribing,
     transcript,
-    interimTranscript,
     error: speechError,
     isSupported: sttSupported,
     volumeLevel,
     startListening,
     stopListening,
     resetTranscript,
-  } = useSpeechRecognition({ lang: "ko-KR", continuous: true });
+  } = useWhisperRecognition();
 
   const {
     isSpeaking,
@@ -158,10 +164,11 @@ export default function Home() {
     if (phase !== "interview") return;
     if (prevSpeakingRef.current && !isSpeaking && !turnSubmitted && !aiGenerating) {
       resetTranscript();
-      startListening();
+      const context = buildContextForSTT(assignment.text, currentTopic?.turns || []);
+      startListening(context);
     }
     prevSpeakingRef.current = isSpeaking;
-  }, [isSpeaking, interviewMode, phase, turnSubmitted, aiGenerating, resetTranscript, startListening]);
+  }, [isSpeaking, interviewMode, phase, turnSubmitted, aiGenerating, resetTranscript, startListening, assignment.text, currentTopic?.turns]);
 
   useEffect(() => {
     if (phase !== "interview" && interviewMode === "voice") {
@@ -356,23 +363,13 @@ export default function Home() {
   };
 
   const handleVoiceSubmit = useCallback(async () => {
-    if (turnSubmitted || !currentTopic) return;
-    stopListening();
+    if (turnSubmitted || !currentTopic || isTranscribing) return;
     setTurnSubmitted(true);
     
-    const message = transcript.trim();
-    if (!message) {
-      setTopicsState((prev) =>
-        prev.map((t, idx) => {
-          if (idx === currentTopicIndex) {
-            return { ...t, turns: [...(t.turns || []), { role: "student", text: "(응답 없음)" }] };
-          }
-          return t;
-        }),
-      );
-    }
-    
+    const transcribedText = await stopListening();
+    const message = transcribedText.trim();
     const studentResponse = message || "(응답 없음)";
+    
     resetTranscript();
     setStudentInput("");
 
@@ -408,7 +405,7 @@ export default function Home() {
     } finally {
       setAiGenerating(false);
     }
-  }, [turnSubmitted, transcript, currentTopic, currentTopicIndex, stopListening, resetTranscript, fetchQuestion]);
+  }, [turnSubmitted, isTranscribing, currentTopic, currentTopicIndex, stopListening, resetTranscript, fetchQuestion]);
 
   const finalizeSession = useCallback(
     async (doneTopics) => {
@@ -567,7 +564,7 @@ export default function Home() {
           inputDisabled={inputDisabled}
           interviewMode={interviewMode}
           isListening={isListening}
-          interimTranscript={interimTranscript}
+          isTranscribing={isTranscribing}
           isSpeaking={isSpeaking}
           speechError={speechError}
           turnSubmitted={turnSubmitted}
@@ -670,7 +667,7 @@ function InterviewCard({
   inputDisabled,
   interviewMode,
   isListening,
-  interimTranscript,
+  isTranscribing,
   isSpeaking,
   speechError,
   turnSubmitted,
@@ -743,6 +740,15 @@ function InterviewCard({
                 <span className={styles.speakingIndicatorLarge}>🔊</span>
                 <p>AI가 질문을 읽고 있습니다...</p>
               </div>
+            ) : isTranscribing ? (
+              <div className={styles.voiceGenerating}>
+                <div className={styles.typingDots}>
+                  <span />
+                  <span />
+                  <span />
+                </div>
+                <p>음성을 텍스트로 변환 중...</p>
+              </div>
             ) : turnSubmitted ? (
               <div className={styles.voiceGenerating}>
                 <p>답변이 제출되었습니다. 다음 질문을 기다려주세요.</p>
@@ -761,13 +767,10 @@ function InterviewCard({
           </div>
           <div className={styles.voiceResponseArea}>
             {speechError && <div className={styles.speechError}>{speechError}</div>}
-            {isListening && (studentInput || interimTranscript) && (
-              <p className={styles.voiceTranscriptText}>{studentInput || interimTranscript}</p>
-            )}
             <button
               className={clsx(styles.micButtonLarge, styles.micButtonStop)}
               onClick={onVoiceSubmit}
-              disabled={inputDisabled || aiGenerating || isSpeaking || turnSubmitted}
+              disabled={inputDisabled || aiGenerating || isSpeaking || turnSubmitted || isTranscribing}
             >
               ⏹️ 답변 완료
             </button>

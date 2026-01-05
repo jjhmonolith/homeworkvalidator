@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
 import pdfParse from 'pdf-parse';
+import multer from 'multer';
 
 dotenv.config();
 
@@ -364,6 +365,35 @@ app.post('/api/tts', async (req, res) => {
   } catch (err) {
     console.error('tts error', err);
     return res.status(500).json({ error: 'tts_failed' });
+  }
+});
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+app.post('/api/stt', upload.single('audio'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'audio file is required' });
+  }
+  if (!openai) {
+    return res.status(503).json({ error: 'OpenAI API not configured' });
+  }
+  
+  const contextPrompt = req.body.context || '';
+  
+  try {
+    const file = new File([req.file.buffer], 'audio.webm', { type: req.file.mimetype });
+    
+    const transcription = await openai.audio.transcriptions.create({
+      model: 'whisper-1',
+      file: file,
+      language: 'ko',
+      prompt: contextPrompt.slice(0, 500),
+    });
+    
+    return res.json({ text: transcription.text });
+  } catch (err) {
+    console.error('stt error', err);
+    return res.status(500).json({ error: 'stt_failed', detail: err.message });
   }
 });
 

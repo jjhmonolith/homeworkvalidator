@@ -2,142 +2,36 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}) {
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4010";
+
+export function useWhisperRecognition() {
   const [isListening, setIsListening] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcript, setTranscript] = useState("");
-  const [interimTranscript, setInterimTranscript] = useState("");
   const [error, setError] = useState(null);
-  const [isSupported, setIsSupported] = useState(false);
   const [volumeLevel, setVolumeLevel] = useState(0);
 
-  const recognitionRef = useRef(null);
-  const shouldRestartRef = useRef(false);
-  const accumulatedRef = useRef("");
-  const sessionFinalRef = useRef("");
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const mediaStreamRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
-  const mediaStreamRef = useRef(null);
   const animationFrameRef = useRef(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      setIsSupported(false);
-      return;
-    }
-
-    setIsSupported(true);
-    const recognition = new SpeechRecognition();
-    recognition.lang = lang;
-    recognition.continuous = continuous;
-    recognition.interimResults = true;
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      setError(null);
-    };
-
-    recognition.onend = () => {
-      if (sessionFinalRef.current) {
-        accumulatedRef.current = (accumulatedRef.current + " " + sessionFinalRef.current).trim();
-        sessionFinalRef.current = "";
-      }
-      
-      if (shouldRestartRef.current && continuous) {
-        try {
-          recognition.start();
-        } catch (err) {
-          setIsListening(false);
-        }
-      } else {
-        setIsListening(false);
-      }
-    };
-
-    recognition.onerror = (event) => {
-      if (event.error === "no-speech" && continuous && shouldRestartRef.current) {
-        try {
-          recognition.start();
-        } catch (err) {
-          setIsListening(false);
-        }
-        return;
-      }
-      setIsListening(false);
-      if (event.error === "no-speech") {
-        return;
-      } else if (event.error === "not-allowed") {
-        setError("마이크 권한이 필요합니다. 브라우저 설정에서 허용해 주세요.");
-      } else if (event.error !== "aborted") {
-        setError(`음성 인식 오류: ${event.error}`);
-      }
-    };
-
-    recognition.onresult = (event) => {
-      let sessionFinal = "";
-      let interim = "";
-
-      for (let i = 0; i < event.results.length; i++) {
-        const result = event.results[i];
-        if (result.isFinal) {
-          sessionFinal += result[0].transcript + " ";
-        } else {
-          interim += result[0].transcript;
-        }
-      }
-
-      sessionFinalRef.current = sessionFinal.trim();
-      const fullTranscript = (accumulatedRef.current + " " + sessionFinal).trim();
-      setTranscript(fullTranscript);
-      setInterimTranscript(interim);
-    };
-
-    recognitionRef.current = recognition;
-
-    return () => {
-      shouldRestartRef.current = false;
-      recognition.abort();
-    };
-  }, [lang, continuous]);
-
-  const startVolumeMonitoring = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-      
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      audioContextRef.current = audioContext;
-      
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-      
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
-      
-      const dataArray = new Uint8Array(analyser.frequencyBinCount);
-      
-      const updateVolume = () => {
-        if (!analyserRef.current) return;
-        analyserRef.current.getByteFrequencyData(dataArray);
-        const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-        const normalized = Math.min(average / 128, 1);
-        setVolumeLevel(normalized);
-        animationFrameRef.current = requestAnimationFrame(updateVolume);
-      };
-      updateVolume();
-    } catch (err) {
-      console.warn("Volume monitoring not available");
-    }
-  }, []);
+  const contextRef = useRef("");
 
   const stopVolumeMonitoring = useCallback(() => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
     }
+    if (analyserRef.current) {
+      analyserRef.current = null;
+    }
+    setVolumeLevel(0);
+  }, []);
+
+  const cleanup = useCallback(() => {
+    stopVolumeMonitoring();
     if (audioContextRef.current) {
       audioContextRef.current.close();
       audioContextRef.current = null;
@@ -146,51 +40,129 @@ export function useSpeechRecognition({ lang = "ko-KR", continuous = false } = {}
       mediaStreamRef.current.getTracks().forEach(track => track.stop());
       mediaStreamRef.current = null;
     }
-    setVolumeLevel(0);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    mediaRecorderRef.current = null;
+  }, [stopVolumeMonitoring]);
+
+  const startListening = useCallback(async (context = "") => {
+    contextRef.current = context;
+    audioChunksRef.current = [];
+    setTranscript("");
+    setError(null);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      audioContextRef.current = audioContext;
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      const source = audioContext.createMediaStreamSource(stream);
+      source.connect(analyser);
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateVolume = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+        setVolumeLevel(Math.min(average / 128, 1));
+        animationFrameRef.current = requestAnimationFrame(updateVolume);
+      };
+      updateVolume();
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.start(1000);
+      setIsListening(true);
+    } catch (err) {
+      setError("마이크 권한이 필요합니다.");
+      console.error("Microphone access error:", err);
+    }
   }, []);
 
-  const startListening = useCallback(() => {
-    if (!recognitionRef.current) return;
-    shouldRestartRef.current = true;
-    accumulatedRef.current = "";
-    sessionFinalRef.current = "";
-    setTranscript("");
-    setInterimTranscript("");
-    setError(null);
-    startVolumeMonitoring();
-    try {
-      recognitionRef.current.start();
-    } catch (err) {
-      console.warn("Speech recognition already started");
+  const stopListening = useCallback(async () => {
+    if (!mediaRecorderRef.current || mediaRecorderRef.current.state === "inactive") {
+      return "";
     }
-  }, [startVolumeMonitoring]);
 
-  const stopListening = useCallback(() => {
-    if (!recognitionRef.current) return;
-    shouldRestartRef.current = false;
-    recognitionRef.current.stop();
+    setIsListening(false);
+    setIsTranscribing(true);
     stopVolumeMonitoring();
-  }, [stopVolumeMonitoring]);
+
+    return new Promise((resolve) => {
+      mediaRecorderRef.current.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        
+        if (audioBlob.size < 1000) {
+          setIsTranscribing(false);
+          cleanup();
+          resolve("");
+          return;
+        }
+
+        try {
+          const formData = new FormData();
+          formData.append("audio", audioBlob, "recording.webm");
+          formData.append("context", contextRef.current);
+
+          const response = await fetch(`${API_BASE}/api/stt`, {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!response.ok) {
+            throw new Error("STT request failed");
+          }
+
+          const data = await response.json();
+          const text = data.text || "";
+          setTranscript(text);
+          resolve(text);
+        } catch (err) {
+          console.error("STT error:", err);
+          setError("음성 인식에 실패했습니다.");
+          resolve("");
+        } finally {
+          setIsTranscribing(false);
+          cleanup();
+        }
+      };
+
+      mediaRecorderRef.current.stop();
+    });
+  }, [stopVolumeMonitoring, cleanup]);
 
   const resetTranscript = useCallback(() => {
     setTranscript("");
-    setInterimTranscript("");
   }, []);
+
+  useEffect(() => {
+    return () => cleanup();
+  }, [cleanup]);
 
   return {
     isListening,
+    isTranscribing,
     transcript,
-    interimTranscript,
     error,
-    isSupported,
+    isSupported: true,
     volumeLevel,
     startListening,
     stopListening,
     resetTranscript,
   };
 }
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4010";
 
 export function useSpeechSynthesis() {
   const [isSpeaking, setIsSpeaking] = useState(false);
