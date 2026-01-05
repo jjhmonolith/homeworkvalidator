@@ -155,12 +155,20 @@ export default function Home() {
 
   useEffect(() => {
     if (interviewMode !== "voice") return;
+    if (phase !== "interview") return;
     if (prevSpeakingRef.current && !isSpeaking && !turnSubmitted && !aiGenerating) {
       resetTranscript();
       startListening();
     }
     prevSpeakingRef.current = isSpeaking;
-  }, [isSpeaking, interviewMode, turnSubmitted, aiGenerating, resetTranscript, startListening]);
+  }, [isSpeaking, interviewMode, phase, turnSubmitted, aiGenerating, resetTranscript, startListening]);
+
+  useEffect(() => {
+    if (phase !== "interview" && interviewMode === "voice") {
+      stopListening();
+      stopSpeaking();
+    }
+  }, [phase, interviewMode, stopListening, stopSpeaking]);
 
   useEffect(() => {
     if (phase !== "interview") return;
