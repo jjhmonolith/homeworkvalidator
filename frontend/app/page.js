@@ -210,12 +210,11 @@ export default function Home() {
     const data = await apiFetch("/api/question", {
       topic,
       assignmentText: assignment.text || "",
-      excerpt: (assignment.text || "").slice(0, 1500),
       previousQA,
       studentAnswer,
       interviewMode: interviewMode || "chat",
     });
-    return data.question || "주제와 관련된 내용을 더 자세히 설명해 주시겠어요?";
+    return data.question || "이 부분을 왜 이렇게 작성하셨나요?";
   }, [assignment.text, interviewMode]);
 
   const handleUpload = async (file) => {
@@ -283,13 +282,12 @@ export default function Home() {
       const question = await apiFetch("/api/question", {
         topic,
         assignmentText: text || "",
-        excerpt: (text || "").slice(0, 1500),
         previousQA: [],
         studentAnswer: "",
       });
       const questionText =
         (typeof question === "object" ? question.question : question) ||
-        "주제와 관련된 내용을 더 자세히 설명해 주시겠어요?";
+        "이 부분을 왜 이렇게 작성하셨나요?";
       setTopicsState((prev) =>
         prev.map((t, idx) => {
           if (idx === index) {
@@ -687,7 +685,6 @@ function InterviewCard({
         <div className={styles.topicHeader}>
           <p className={styles.cardEyebrow}>주제 {progressText}</p>
           <h2 className={styles.cardTitle}>{topic.title}</h2>
-          <p className={styles.cardDescription}>{topic.description}</p>
         </div>
         <div className={styles.topicList}>
           {topics.map((t, idx) => (

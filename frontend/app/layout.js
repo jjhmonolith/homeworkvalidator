@@ -5,7 +5,7 @@ const noto = Noto_Sans_KR({ subsets: ["latin"], weight: ["400", "500", "700"] })
 
 export const metadata = {
   title: "Homework Validator",
-  description: "PDF 기반 AI 인터뷰로 과제 이해도를 확인하는 도구",
+  description: "PDF 기반 AI 인터뷰로 과제 소유감을 확인하는 도구",
 };
 
 export default function RootLayout({ children }) {

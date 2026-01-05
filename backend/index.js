@@ -30,24 +30,76 @@ const hasApiKey = Boolean(process.env.OPENAI_API_KEY);
 const openai = hasApiKey ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const model = process.env.OPENAI_MODEL || 'gpt-5.1'; // target: gpt-5.1-mini when available
 
-const analyzeSystemPrompt = `너는 대학생 과제 이해도 인터뷰를 준비하는 조교 AI이다.\n다음 한국어 에세이/레포트를 읽고, 5개 이하의 주제 블록으로 나누고,\n각 블록의 제목과 설명을 한국어로 JSON 형식으로 만들어라.\n\n응답 형식(JSON):\n{\n  "topics": [\n    { "id": "t1", "title": "주제 제목", "description": "이 주제가 다루는 핵심 내용을 2~3문장으로 설명" }\n  ]\n}\n반드시 위 JSON 형식만 반환하고, 다른 텍스트는 포함하지 마라. 요약은 만들지 않는다.`;
+const analyzeSystemPrompt = `너는 대학생 과제의 주제를 분석하는 AI이다.
+다음 한국어 에세이/레포트를 읽고, 3~5개의 핵심 주제를 추출하라.
+각 주제는 학생이 과제를 직접 작성했는지 확인하기 위한 인터뷰에 사용된다.
 
-const generateSystemPrompt = `너는 학생의 과제 이해도를 확인하는 친절한 조교 AI이다.
+응답 형식(JSON):
+{
+  "topics": [
+    { "id": "t1", "title": "주제 제목 (간결하게)" }
+  ]
+}
+반드시 위 JSON 형식만 반환하고, 다른 텍스트는 포함하지 마라.`;
+
+const generateSystemPrompt = `너는 학생이 제출한 과제가 본인이 직접 작성한 것인지 확인하는 면접관 AI이다.
+
+목적:
+- 학생이 과제를 직접 작성했는지, 아니면 AI가 생성한 것을 그대로 제출했는지 판별
+- 직접 작성하지 않았더라도, 최소한 내용을 이해하고 자신의 생각을 반영했는지 확인
 
 핵심 규칙:
 1. 한국어 존댓말로 질문한다.
 2. 한 번에 하나의 질문만 한다.
-3. 과제 본문에 실제로 등장하는 내용만 질문한다.
-4. 과제에 없는 개념이나 가정을 만들어 질문하지 않는다.
-5. 학생이 과제 내용을 자신의 말로 설명하게 하거나, 이유/근거를 묻는다.
-6. 압박하지 말고 이해를 돕는 방향으로 질문한다.
+3. 과제 본문에 실제로 등장하는 내용을 기반으로 질문한다.
+4. 단순 암기나 내용 확인이 아닌, 작성 과정과 의사결정을 묻는다.
 
-질문 예시:
-- "이 부분에서 말하는 핵심 주장이 무엇인지 설명해 주시겠어요?"
-- "왜 이런 결론에 도달했는지 이유를 말씀해 주세요."
-- "여기서 언급한 사례가 어떤 의미인지 설명해 주시겠어요?"`;
+효과적인 질문 유형:
+- 작성 의도: "이 부분을 왜 이렇게 작성하셨나요?"
+- 선택 이유: "여러 방법 중 이 접근법을 선택한 이유가 있나요?"
+- 작성 경험: "이 내용을 조사하면서 어려웠던 점이 있었나요?"
+- 개인 의견: "이 주장에 대해 본인은 어떻게 생각하시나요?"
+- 구체적 디테일: "여기서 언급한 [특정 수치/사례/인용]을 왜 포함시키셨나요?"
+- 대안 고려: "다른 방식으로 쓸 수도 있었을 텐데, 이 방식을 선택한 이유는요?"
 
-const summarizeSystemPrompt = `너는 학생의 과제 이해도와 "과제에 대한 소유감"을 평가하는 조교이다.\n대화를 읽고, 학생이 과제 내용을 얼마나 이해하고 있는지,\n실제로 과제를 읽어보고 자신의 생각에 맞게 고쳤거나 검증했는지를 추론해야 한다.\n\n일반적인 과제 유형(조사/보고서/의견 에세이)을 가정하고 다음을 살펴보라:\n- 학생이 과제의 핵심 주장과 구조(서론-본론-결론 또는 주요 항목들)를 자신의 말로 설명할 수 있는지\n- 과제에 나온 구체적인 내용(예: 수치, 사례, 인용, 정의)을 자연스럽게 언급하고 설명하는지\n- "너무 일반적인 AI스러운 말"만 반복하는지, 아니면 과제에 실제로 등장하는 디테일을 이해하고 활용하는지\n- 질문에 대한 답변이 과제 본문과 논리적으로 일관된지, 전혀 다른 이야기를 하는지\n\n이 정보를 바탕으로, 학생이 과제를 직접 작성했거나\n최소한 AI가 만들어 준 결과물을 꼼꼼히 읽고 자신의 생각에 맞게 수정·검증했을 가능성이\n높은지/낮은지를 판단하고, overallComment에 그 판단을 부드럽게 서술하라.\n\n또한, 학생의 발화 내용이 제출된 과제 본문과 얼마나 잘 일치하는지 평가하라.\n과제에 포함된 주장/근거/예시와 전혀 관련이 없는 이야기를 하는지,\n혹은 과제 내용과 모순되는 설명을 하는지 주의 깊게 살펴보라.\n\n중요:\n- 'AI:'로 시작하는 줄은 AI의 발화이며, 평가에 사용하지 않는다.\n- '학생:'으로 시작하는 줄만 학생의 이해도 평가에 사용한다.\n- 학생이 더 많은 질문에 도전했을 경우(대화 길이가 길수록),\n  일부 질문에 정확히 답하지 못하더라도, 매우 짧게만 대답하고 넘어간 경우보다\n  약간 더 긍정적인 평가를 받는 경향이 있도록 판단하라.\n- 학생이 한 마디도 하지 않았다면, strengths는 빈 배열로 두고,\n  overallComment에 "학생의 응답이 없어 이해도를 평가할 수 없습니다."와 비슷한 문장을 써라.\n\n응답 JSON 형식:\n{\n  "strengths": ["..."],\n  "weaknesses": ["..."],\n  "overallComment": "..."\n}`;
+피해야 할 질문:
+- 단순 요약 요청: "이 부분을 설명해 주세요" (읽으면 누구나 가능)
+- 정의 확인: "X가 무엇인가요?" (검색하면 누구나 가능)
+- 예/아니오 질문: 구체적인 설명을 유도할 수 없음`;
+
+const summarizeSystemPrompt = `너는 학생이 과제를 직접 작성했는지 판별하는 평가자이다.
+
+평가 목적:
+인터뷰 대화를 바탕으로 학생의 "과제 소유감"을 평가한다.
+- 직접 작성: 작성 과정, 의사결정, 개인적 고민을 구체적으로 설명할 수 있음
+- AI 생성 후 검토: 내용은 이해하지만 작성 과정에 대한 답변이 모호함
+- AI 생성 그대로 제출: 내용도 제대로 모르고, 왜 이렇게 썼는지 설명 못함
+
+판별 기준:
+1. 작성 과정 설명: "왜 이렇게 썼나요?"에 구체적으로 답변하는가?
+2. 의사결정 근거: 특정 표현, 구조, 사례 선택의 이유를 설명하는가?
+3. 개인적 경험: 조사 과정, 어려웠던 점, 새롭게 알게 된 점을 언급하는가?
+4. 대안 인식: 다른 방법도 고려했음을 보여주는가?
+5. 일관성: 과제 내용과 답변이 논리적으로 일치하는가?
+
+위험 신호 (AI 생성 의심):
+- "그냥 이렇게 쓰는 게 맞는 것 같아서요"
+- 작성 과정에 대한 질문에 내용 요약으로 대답
+- 구체적인 의사결정 질문에 일반적인 답변
+- 과제 내용과 모순되는 설명
+
+평가 규칙:
+- 'AI:'로 시작하는 줄은 면접관 발화이며 평가 대상 아님
+- '학생:'으로 시작하는 줄만 평가에 사용
+- 학생이 응답하지 않았다면 평가 불가로 처리
+- 적극적으로 대화에 참여한 경우 약간의 가산점 부여
+
+응답 JSON 형식:
+{
+  "strengths": ["직접 작성했음을 보여주는 증거들"],
+  "weaknesses": ["AI 생성 의심 또는 이해 부족 증거들"],
+  "overallComment": "종합 판단: 직접 작성 가능성 높음/낮음, 근거 요약"
+}`;
 
 function extractFromResponse(response) {
   let text = '';
@@ -194,16 +246,14 @@ app.get('/health', (_req, res) => {
       });
       parsed = {
         topics: [
-          { id: 't1', title: '주제 1', description: 'AI 응답을 파싱하지 못했습니다. 다시 시도해 주세요.' },
+          { id: 't1', title: '주제 1' },
         ],
       };
     }
-    // Normalize topics length and ids
     const topics = (parsed.topics && Array.isArray(parsed.topics))
       ? parsed.topics.slice(0, 5).map((t, idx) => ({
           id: t.id || `t${idx + 1}`,
           title: t.title || `주제 ${idx + 1}`,
-          description: t.description || '',
         }))
       : [];
     return res.json({ analysis: { topics }, text: assignmentPlain, fallback });
@@ -221,12 +271,12 @@ const voiceModeAddendum = `
 - 질문은 듣기 쉽고 간결하게 한다. 너무 긴 질문은 피한다.`;
 
 app.post('/api/question', async (req, res) => {
-  const { summary, topic, excerpt, assignmentText, previousQA = [], studentAnswer, interviewMode } = req.body || {};
+  const { topic, assignmentText, previousQA = [], studentAnswer, interviewMode } = req.body || {};
   if (!topic) {
     return res.status(400).json({ error: 'topic is required' });
   }
-  const docContent = (assignmentText || excerpt || '').slice(0, 14000) || '본문 없음';
-  const userContext = `과제 본문(일부):\n${docContent}\n\n현재 주제: ${topic.title}\n${topic.description}\n\n요약(선택):\n${summary || '제공되지 않음'}\n\n이전 Q&A:\n${previousQA.map((turn) => `${turn.role === 'ai' ? 'AI' : '학생'}: ${turn.text}`).join('\n') || '없음'}\n\n학생 최신 답변:\n${studentAnswer || '없음'}`;
+  const docContent = (assignmentText || '').slice(0, 14000) || '본문 없음';
+  const userContext = `과제 본문:\n${docContent}\n\n현재 주제: ${topic.title}\n\n이전 Q&A:\n${previousQA.map((turn) => `${turn.role === 'ai' ? 'AI' : '학생'}: ${turn.text}`).join('\n') || '없음'}\n\n학생 최신 답변:\n${studentAnswer || '없음'}`;
 
   const systemPrompt = interviewMode === 'voice' 
     ? generateSystemPrompt + voiceModeAddendum 
@@ -253,7 +303,7 @@ const voiceSummaryAddendum = `
 - 이 인터뷰는 음성으로 진행되었다. 학생의 답변은 음성 인식(STT)으로 변환된 텍스트이다.
 - 음성 인식 특성상 오탈자, 띄어쓰기 오류, 동음이의어 오인식이 있을 수 있다. 이를 감안하여 평가한다.
 - 구어체 표현, 말 더듬음, 반복 등은 자연스러운 것이므로 부정적으로 평가하지 않는다.
-- 핵심은 학생이 과제 내용을 이해하고 있는지 여부이다.`;
+- 핵심은 학생이 과제를 직접 작성했는지 여부이다.`;
 
 app.post('/api/summary', async (req, res) => {
   const { transcript, topics, assignmentText, interviewMode } = req.body || {};
@@ -261,7 +311,7 @@ app.post('/api/summary', async (req, res) => {
     return res.status(400).json({ error: 'transcript is required' });
   }
   const docContent = (assignmentText || '').slice(0, 14000);
-  const userContent = `과제 본문(일부):\n${docContent}\n\n주제 목록:\n${(topics || []).map((t) => `${t.title}: ${t.description}`).join('\n')}\n\n대화 로그:\n${transcript}`;
+  const userContent = `과제 본문:\n${docContent}\n\n주제 목록:\n${(topics || []).map((t) => t.title).join(', ')}\n\n대화 로그:\n${transcript}`;
   
   const systemPrompt = interviewMode === 'voice'
     ? summarizeSystemPrompt + voiceSummaryAddendum
