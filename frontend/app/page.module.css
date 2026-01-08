@@ -154,6 +154,11 @@
   border-color: rgba(123, 224, 195, 0.7);
 }
 
+.uploadAreaSelected {
+  border-color: var(--accent);
+  background: rgba(123, 224, 195, 0.08);
+}
+
 .fileInput {
   display: none;
 }
@@ -973,6 +978,12 @@
   background: rgba(123, 224, 195, 0.15);
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.settingButtonDisabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 @media (max-width: 600px) {

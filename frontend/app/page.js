@@ -9,9 +9,8 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4010";
 const AUTO_ADVANCE_SECONDS = 5;
 
 const phaseLabels = {
-  upload: "과제 업로드",
+  upload: "인터뷰 설정",
   analyzing: "과제 분석중",
-  modeSelect: "인터뷰 방식 선택",
   prep: "인터뷰 준비중",
   interview: "인터뷰 진행중",
   finalizing: "결과 분석중",
@@ -224,48 +223,42 @@ export default function Home() {
     return data.question || "이 부분을 왜 이렇게 작성하셨나요?";
   }, [assignment.text, interviewMode]);
 
-  const handleUpload = async (file) => {
+  const handleStart = async (file, { topicCount, topicDuration, interviewMode: mode }) => {
     if (!file) {
       setError("PDF 파일을 선택해 주세요.");
       return;
     }
-    if (file.type !== "application/pdf") {
-      setError("PDF 파일만 업로드할 수 있습니다.");
-      return;
-    }
+    
     setError("");
+    setInterviewMode(mode);
+    setSettings({ topicCount, topicDuration });
     setPhase("analyzing");
+    
     try {
       const base64 = await fileToBase64(file);
       const data = await apiFetch("/api/analyze", { pdfBase64: base64 });
-      const topics = (data.analysis?.topics || []).slice(0, 5);
-      if (!topics.length) throw new Error("AI가 주제를 만들지 못했습니다.");
-      setAssignment({ topics, text: data.text || "" });
-      setPhase("modeSelect");
+      const allTopics = (data.analysis?.topics || []).slice(0, 5);
+      if (!allTopics.length) throw new Error("AI가 주제를 만들지 못했습니다.");
+      
+      const selectedTopics = allTopics.slice(0, topicCount);
+      const normalizedTopics = selectedTopics.map((t, idx) => ({
+        ...t,
+        timeLeft: topicDuration,
+        turns: [],
+        status: idx === 0 ? "active" : "pending",
+        started: false,
+        asked: false,
+      }));
+      
+      setAssignment({ topics: normalizedTopics, text: data.text || "" });
+      setTopicsState(normalizedTopics);
+      setCurrentTopicIndex(0);
+      await prepareTopic(0, normalizedTopics, data.text || "");
     } catch (err) {
       console.error(err);
       setError(err.message || "업로드에 실패했습니다.");
       setPhase("upload");
     }
-  };
-
-  const handleModeSelect = async (mode, { topicCount, topicDuration }) => {
-    setInterviewMode(mode);
-    setSettings({ topicCount, topicDuration });
-    
-    const selectedTopics = assignment.topics.slice(0, topicCount);
-    const normalizedTopics = selectedTopics.map((t, idx) => ({
-      ...t,
-      timeLeft: topicDuration,
-      turns: [],
-      status: idx === 0 ? "active" : "pending",
-      started: false,
-      asked: false,
-    }));
-    
-    setTopicsState(normalizedTopics);
-    setCurrentTopicIndex(0);
-    await prepareTopic(0, normalizedTopics, assignment.text || "");
   };
 
   const prepareTopic = useCallback(async (index, nextTopics, text) => {
@@ -307,7 +300,7 @@ export default function Home() {
               ...t,
               turns,
               status: "active",
-              timeLeft: t.timeLeft || TOPIC_SECONDS,
+              timeLeft: t.timeLeft,
               started: true,
               asked: true,
             };
@@ -530,18 +523,11 @@ export default function Home() {
 
       {error && <div className={styles.errorBanner}>{error}</div>}
 
-      {phase === "upload" && <UploadCard onUpload={handleUpload} />}
+      {phase === "upload" && <UploadCard onStart={handleStart} sttSupported={sttSupported} />}
       {phase === "analyzing" && (
         <LoadingCard
           label="과제 분석중"
           detail="AI가 과제의 요약과 주제 블록을 만드는 중입니다. 잠시만 기다려 주세요."
-        />
-      )}
-      {phase === "modeSelect" && (
-        <ModeSelectCard
-          onSelect={handleModeSelect}
-          sttSupported={sttSupported}
-          topics={topicsState}
         />
       )}
       {phase === "prep" && (
@@ -591,51 +577,116 @@ export default function Home() {
   );
 }
 
-function UploadCard({ onUpload }) {
-  const [fileName, setFileName] = useState("");
+function UploadCard({ onStart, sttSupported }) {
+  const [file, setFile] = useState(null);
+  const [topicCount, setTopicCount] = useState(3);
+  const [topicDuration, setTopicDuration] = useState(180);
+  const [interviewMode, setInterviewMode] = useState("voice");
 
-  const handleFileSelect = (file) => {
-    if (file) {
-      setFileName(file.name);
-      onUpload(file);
+  const handleFileSelect = (selectedFile) => {
+    if (selectedFile && selectedFile.type === "application/pdf") {
+      setFile(selectedFile);
     }
+  };
+
+  const handleStart = () => {
+    if (!file) return;
+    onStart(file, { topicCount, topicDuration, interviewMode });
   };
 
   return (
     <div className={styles.card}>
       <div className={styles.cardHeader}>
         <div>
-          <p className={styles.cardEyebrow}>STEP 1</p>
+          <p className={styles.cardEyebrow}>인터뷰 설정</p>
           <h2 className={styles.cardTitle}>과제 PDF 업로드</h2>
           <p className={styles.cardDescription}>
-            로그인 없이 즉시 업로드하세요. 업로드와 동시에 새로운 세션이 시작됩니다.
+            PDF를 업로드하고 설정을 선택한 후 인터뷰를 시작하세요.
           </p>
         </div>
-        <div className={styles.uploadHelper}>PDF만 허용 · 세션 저장 없음</div>
       </div>
+
       <label
-        className={styles.uploadArea}
+        className={clsx(styles.uploadArea, file && styles.uploadAreaSelected)}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
-          const file = e.dataTransfer.files?.[0];
-          handleFileSelect(file);
+          handleFileSelect(e.dataTransfer.files?.[0]);
         }}
       >
         <input
           type="file"
           accept="application/pdf"
           className={styles.fileInput}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            handleFileSelect(file);
-          }}
+          onChange={(e) => handleFileSelect(e.target.files?.[0])}
         />
         <div>
-          <p className={styles.uploadTitle}>PDF를 끌어놓거나 클릭해 업로드</p>
-          <p className={styles.uploadSub}>{fileName || "한글 과제만 지원하며, 업로드 후 바로 분석합니다."}</p>
+          <p className={styles.uploadTitle}>
+            {file ? `✓ ${file.name}` : "PDF를 끌어놓거나 클릭해 업로드"}
+          </p>
+          <p className={styles.uploadSub}>
+            {file ? "다른 파일을 선택하려면 다시 클릭하세요" : "PDF만 허용"}
+          </p>
         </div>
       </label>
+
+      <div className={styles.settingsSection}>
+        <div className={styles.settingRow}>
+          <label className={styles.settingLabel}>주제 개수</label>
+          <div className={styles.settingButtons}>
+            {[1, 2, 3].map((n) => (
+              <button
+                key={n}
+                className={clsx(styles.settingButton, topicCount === n && styles.settingButtonActive)}
+                onClick={() => setTopicCount(n)}
+              >
+                {n}개
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className={styles.settingRow}>
+          <label className={styles.settingLabel}>주제별 제한 시간</label>
+          <div className={styles.settingButtons}>
+            {[60, 120, 180].map((sec) => (
+              <button
+                key={sec}
+                className={clsx(styles.settingButton, topicDuration === sec && styles.settingButtonActive)}
+                onClick={() => setTopicDuration(sec)}
+              >
+                {sec / 60}분
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className={styles.settingRow}>
+          <label className={styles.settingLabel}>인터뷰 방식</label>
+          <div className={styles.settingButtons}>
+            <button
+              className={clsx(styles.settingButton, interviewMode === "chat" && styles.settingButtonActive)}
+              onClick={() => setInterviewMode("chat")}
+            >
+              💬 채팅
+            </button>
+            <button
+              className={clsx(styles.settingButton, interviewMode === "voice" && styles.settingButtonActive, !sttSupported && styles.settingButtonDisabled)}
+              onClick={() => sttSupported && setInterviewMode("voice")}
+              disabled={!sttSupported}
+            >
+              🎤 음성
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <button
+        className={styles.primaryButton}
+        style={{ width: "100%", padding: "14px", fontSize: "16px" }}
+        onClick={handleStart}
+        disabled={!file}
+      >
+        인터뷰 시작
+      </button>
     </div>
   );
 }
@@ -908,93 +959,4 @@ function ResultCard({ summary, onReset }) {
   );
 }
 
-function ModeSelectCard({ onSelect, sttSupported, topics }) {
-  const [topicCount, setTopicCount] = useState(Math.min(3, topics.length));
-  const [topicDuration, setTopicDuration] = useState(180);
-  const maxTopics = Math.min(3, topics.length);
 
-  const handleSelect = (mode) => {
-    onSelect(mode, { topicCount, topicDuration });
-  };
-
-  return (
-    <div className={styles.card}>
-      <div className={styles.cardHeader}>
-        <div>
-          <p className={styles.cardEyebrow}>STEP 2</p>
-          <h2 className={styles.cardTitle}>인터뷰 설정</h2>
-          <p className={styles.cardDescription}>
-            인터뷰 설정을 선택한 후 방식을 선택하세요.
-          </p>
-        </div>
-      </div>
-
-      <div className={styles.settingsSection}>
-        <div className={styles.settingRow}>
-          <label className={styles.settingLabel}>주제 개수</label>
-          <div className={styles.settingButtons}>
-            {[1, 2, 3].map((n) => (
-              <button
-                key={n}
-                className={clsx(styles.settingButton, topicCount === n && styles.settingButtonActive)}
-                onClick={() => setTopicCount(n)}
-                disabled={n > maxTopics}
-              >
-                {n}개
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className={styles.settingRow}>
-          <label className={styles.settingLabel}>주제별 제한 시간</label>
-          <div className={styles.settingButtons}>
-            {[60, 120, 180].map((sec) => (
-              <button
-                key={sec}
-                className={clsx(styles.settingButton, topicDuration === sec && styles.settingButtonActive)}
-                onClick={() => setTopicDuration(sec)}
-              >
-                {sec / 60}분
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className={styles.modeSelectGrid}>
-        <button className={styles.modeCard} onClick={() => handleSelect("chat")}>
-          <div className={styles.modeIcon}>💬</div>
-          <h3 className={styles.modeTitle}>채팅 인터뷰</h3>
-          <p className={styles.modeDescription}>
-            텍스트로 질문에 답변합니다. 복사/붙여넣기는 차단됩니다.
-          </p>
-        </button>
-        <button
-          className={clsx(styles.modeCard, !sttSupported && styles.modeCardDisabled)}
-          onClick={() => sttSupported && handleSelect("voice")}
-          disabled={!sttSupported}
-        >
-          <div className={styles.modeIcon}>🎤</div>
-          <h3 className={styles.modeTitle}>음성 인터뷰</h3>
-          <p className={styles.modeDescription}>
-            {sttSupported
-              ? "마이크로 답변하면 AI가 음성으로 질문합니다."
-              : "이 브라우저는 음성 인식을 지원하지 않습니다. Chrome 또는 Edge를 사용해 주세요."}
-          </p>
-        </button>
-      </div>
-
-      <div className={styles.topicPreview}>
-        <p className={styles.cardEyebrow}>분석된 주제 (상위 {topicCount}개 진행)</p>
-        <div className={styles.topicPreviewList}>
-          {topics.slice(0, topicCount).map((t, idx) => (
-            <div key={t.id || idx} className={styles.topicPreviewChip}>
-              <span className={styles.topicPreviewNumber}>{idx + 1}</span>
-              <span>{t.title}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
