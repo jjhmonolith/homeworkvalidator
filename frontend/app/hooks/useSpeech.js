@@ -93,6 +93,7 @@ export function useWhisperRecognition() {
 
   const stopListening = useCallback(async () => {
     if (!mediaRecorderRef.current || mediaRecorderRef.current.state === "inactive") {
+      cleanup();
       return "";
     }
 

@@ -485,6 +485,8 @@ export default function Home() {
   }, [modal?.type, completeTopic]);
 
   const handleReset = () => {
+    stopListening();
+    stopSpeaking();
     setPhase("upload");
     setAssignment({ topics: [], text: "" });
     setTopicsState([]);
@@ -499,7 +501,6 @@ export default function Home() {
     setInterviewMode(null);
     setTurnSubmitted(false);
     resetTranscript();
-    stopSpeaking();
   };
 
   return (
