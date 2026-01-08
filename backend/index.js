@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import OpenAI from 'openai';
+import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import pdfParse from 'pdf-parse';
 import multer from 'multer';
 
@@ -30,6 +31,12 @@ app.use(express.json({ limit: '15mb' }));
 const hasApiKey = Boolean(process.env.OPENAI_API_KEY);
 const openai = hasApiKey ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 const model = process.env.OPENAI_MODEL || 'gpt-5.1'; // target: gpt-5.1-mini when available
+
+// ElevenLabs TTS configuration
+const hasElevenLabsKey = Boolean(process.env.ELEVENLABS_API_KEY);
+const elevenlabs = hasElevenLabsKey ? new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY }) : null;
+const elevenLabsVoiceId = process.env.ELEVENLABS_VOICE_ID || 'XB0fDUnXU5powFXDhCwa'; // Charlotte - multilingual
+const elevenLabsModel = process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5';
 
 const analyzeSystemPrompt = `너는 대학생 과제의 주제를 분석하는 AI이다.
 다음 한국어 에세이/레포트를 읽고, 3~5개의 핵심 주제를 추출하라.
@@ -349,16 +356,22 @@ app.post('/api/tts', async (req, res) => {
   if (!text) {
     return res.status(400).json({ error: 'text is required' });
   }
-  if (!openai) {
-    return res.status(503).json({ error: 'OpenAI API not configured' });
+  if (!elevenlabs) {
+    return res.status(503).json({ error: 'ElevenLabs API not configured' });
   }
   try {
-    const mp3 = await openai.audio.speech.create({
-      model: 'tts-1',
-      voice: 'nova',
-      input: text.slice(0, 4096),
+    const audioStream = await elevenlabs.textToSpeech.convert(elevenLabsVoiceId, {
+      text: text.slice(0, 5000),
+      modelId: elevenLabsModel,
+      outputFormat: 'mp3_44100_128',
     });
-    const buffer = Buffer.from(await mp3.arrayBuffer());
+
+    const chunks = [];
+    for await (const chunk of audioStream) {
+      chunks.push(chunk);
+    }
+    const buffer = Buffer.concat(chunks);
+
     res.set({
       'Content-Type': 'audio/mpeg',
       'Content-Length': buffer.length,
@@ -366,7 +379,7 @@ app.post('/api/tts', async (req, res) => {
     res.send(buffer);
   } catch (err) {
     console.error('tts error', err);
-    return res.status(500).json({ error: 'tts_failed' });
+    return res.status(500).json({ error: 'tts_failed', detail: err.message });
   }
 });
 
