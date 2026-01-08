@@ -356,31 +356,52 @@ app.post('/api/tts', async (req, res) => {
   if (!text) {
     return res.status(400).json({ error: 'text is required' });
   }
-  if (!elevenlabs) {
-    return res.status(503).json({ error: 'ElevenLabs API not configured' });
-  }
-  try {
-    const audioStream = await elevenlabs.textToSpeech.convert(elevenLabsVoiceId, {
-      text: text.slice(0, 5000),
-      modelId: elevenLabsModel,
-      outputFormat: 'mp3_44100_128',
-    });
 
-    const chunks = [];
-    for await (const chunk of audioStream) {
-      chunks.push(chunk);
+  const inputText = text.slice(0, 4096);
+  let buffer;
+
+  // Try ElevenLabs first, fallback to OpenAI
+  if (elevenlabs) {
+    try {
+      const audioStream = await elevenlabs.textToSpeech.convert(elevenLabsVoiceId, {
+        text: inputText,
+        modelId: elevenLabsModel,
+        outputFormat: 'mp3_44100_128',
+      });
+
+      const chunks = [];
+      for await (const chunk of audioStream) {
+        chunks.push(chunk);
+      }
+      buffer = Buffer.concat(chunks);
+    } catch (err) {
+      console.error('ElevenLabs TTS error, falling back to OpenAI:', err.message);
     }
-    const buffer = Buffer.concat(chunks);
-
-    res.set({
-      'Content-Type': 'audio/mpeg',
-      'Content-Length': buffer.length,
-    });
-    res.send(buffer);
-  } catch (err) {
-    console.error('tts error', err);
-    return res.status(500).json({ error: 'tts_failed', detail: err.message });
   }
+
+  // Fallback to OpenAI TTS
+  if (!buffer && openai) {
+    try {
+      const mp3 = await openai.audio.speech.create({
+        model: 'tts-1',
+        voice: 'nova',
+        input: inputText,
+      });
+      buffer = Buffer.from(await mp3.arrayBuffer());
+    } catch (err) {
+      console.error('OpenAI TTS error:', err.message);
+    }
+  }
+
+  if (!buffer) {
+    return res.status(503).json({ error: 'TTS not available' });
+  }
+
+  res.set({
+    'Content-Type': 'audio/mpeg',
+    'Content-Length': buffer.length,
+  });
+  res.send(buffer);
 });
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
