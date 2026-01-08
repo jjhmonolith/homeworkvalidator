@@ -918,3 +918,75 @@
     font-size: 18px;
   }
 }
+
+.settingsSection {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.settingRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settingLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.settingButtons {
+  display: flex;
+  gap: 8px;
+}
+
+.settingButton {
+  background: transparent;
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  color: var(--muted);
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.settingButton:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.settingButton:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.settingButtonActive {
+  background: rgba(123, 224, 195, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 600px) {
+  .settingRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .settingButtons {
+    width: 100%;
+  }
+
+  .settingButton {
+    flex: 1;
+  }
+}

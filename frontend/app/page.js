@@ -6,7 +6,6 @@ import styles from "./page.module.css";
 import { useWhisperRecognition, useSpeechSynthesis } from "./hooks/useSpeech";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:4010";
-const TOPIC_SECONDS = 180;
 const AUTO_ADVANCE_SECONDS = 5;
 
 const phaseLabels = {
@@ -88,6 +87,7 @@ export default function Home() {
   const [advancing, setAdvancing] = useState(false);
   const [interviewMode, setInterviewMode] = useState(null);
   const [turnSubmitted, setTurnSubmitted] = useState(false);
+  const [settings, setSettings] = useState({ topicCount: 3, topicDuration: 180 });
 
   const currentTopic = topicsState[currentTopicIndex];
 
@@ -238,19 +238,9 @@ export default function Home() {
     try {
       const base64 = await fileToBase64(file);
       const data = await apiFetch("/api/analyze", { pdfBase64: base64 });
-      const topics = (data.analysis?.topics || []).slice(0, 3);
+      const topics = (data.analysis?.topics || []).slice(0, 5);
       if (!topics.length) throw new Error("AI가 주제를 만들지 못했습니다.");
-      const normalizedTopics = topics.map((t, idx) => ({
-        ...t,
-        timeLeft: TOPIC_SECONDS,
-        turns: [],
-        status: idx === 0 ? "active" : "pending",
-        started: false,
-        asked: false,
-      }));
-      setAssignment({ topics: normalizedTopics, text: data.text || "" });
-      setTopicsState(normalizedTopics);
-      setCurrentTopicIndex(0);
+      setAssignment({ topics, text: data.text || "" });
       setPhase("modeSelect");
     } catch (err) {
       console.error(err);
@@ -259,9 +249,23 @@ export default function Home() {
     }
   };
 
-  const handleModeSelect = async (mode) => {
+  const handleModeSelect = async (mode, { topicCount, topicDuration }) => {
     setInterviewMode(mode);
-    await prepareTopic(0, topicsState, assignment.text || "");
+    setSettings({ topicCount, topicDuration });
+    
+    const selectedTopics = assignment.topics.slice(0, topicCount);
+    const normalizedTopics = selectedTopics.map((t, idx) => ({
+      ...t,
+      timeLeft: topicDuration,
+      turns: [],
+      status: idx === 0 ? "active" : "pending",
+      started: false,
+      asked: false,
+    }));
+    
+    setTopicsState(normalizedTopics);
+    setCurrentTopicIndex(0);
+    await prepareTopic(0, normalizedTopics, assignment.text || "");
   };
 
   const prepareTopic = useCallback(async (index, nextTopics, text) => {
@@ -500,6 +504,7 @@ export default function Home() {
     setAdvancing(false);
     setInterviewMode(null);
     setTurnSubmitted(false);
+    setSettings({ topicCount: 3, topicDuration: 180 });
     resetTranscript();
   };
 
@@ -511,7 +516,7 @@ export default function Home() {
           <p className={styles.eyebrow}>AI 과제 인터뷰 조교</p>
           <h1 className={styles.title}>Homework Validator</h1>
           <p className={styles.subtitle}>
-            PDF 업로드 → 3개 주제 인터뷰 → 이해도 리포트. 로그인 없이 바로 시작하세요.
+            PDF 업로드 → AI 인터뷰 → 이해도 리포트. 로그인 없이 바로 시작하세요.
           </p>
         </div>
         <div className={styles.statusGroup}>
@@ -904,19 +909,60 @@ function ResultCard({ summary, onReset }) {
 }
 
 function ModeSelectCard({ onSelect, sttSupported, topics }) {
+  const [topicCount, setTopicCount] = useState(Math.min(3, topics.length));
+  const [topicDuration, setTopicDuration] = useState(180);
+  const maxTopics = Math.min(3, topics.length);
+
+  const handleSelect = (mode) => {
+    onSelect(mode, { topicCount, topicDuration });
+  };
+
   return (
     <div className={styles.card}>
       <div className={styles.cardHeader}>
         <div>
           <p className={styles.cardEyebrow}>STEP 2</p>
-          <h2 className={styles.cardTitle}>인터뷰 방식 선택</h2>
+          <h2 className={styles.cardTitle}>인터뷰 설정</h2>
           <p className={styles.cardDescription}>
-            {topics.length}개 주제에 대해 인터뷰를 진행합니다. 원하는 방식을 선택하세요.
+            인터뷰 설정을 선택한 후 방식을 선택하세요.
           </p>
         </div>
       </div>
+
+      <div className={styles.settingsSection}>
+        <div className={styles.settingRow}>
+          <label className={styles.settingLabel}>주제 개수</label>
+          <div className={styles.settingButtons}>
+            {[1, 2, 3].map((n) => (
+              <button
+                key={n}
+                className={clsx(styles.settingButton, topicCount === n && styles.settingButtonActive)}
+                onClick={() => setTopicCount(n)}
+                disabled={n > maxTopics}
+              >
+                {n}개
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className={styles.settingRow}>
+          <label className={styles.settingLabel}>주제별 제한 시간</label>
+          <div className={styles.settingButtons}>
+            {[60, 120, 180].map((sec) => (
+              <button
+                key={sec}
+                className={clsx(styles.settingButton, topicDuration === sec && styles.settingButtonActive)}
+                onClick={() => setTopicDuration(sec)}
+              >
+                {sec / 60}분
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
       <div className={styles.modeSelectGrid}>
-        <button className={styles.modeCard} onClick={() => onSelect("chat")}>
+        <button className={styles.modeCard} onClick={() => handleSelect("chat")}>
           <div className={styles.modeIcon}>💬</div>
           <h3 className={styles.modeTitle}>채팅 인터뷰</h3>
           <p className={styles.modeDescription}>
@@ -925,7 +971,7 @@ function ModeSelectCard({ onSelect, sttSupported, topics }) {
         </button>
         <button
           className={clsx(styles.modeCard, !sttSupported && styles.modeCardDisabled)}
-          onClick={() => sttSupported && onSelect("voice")}
+          onClick={() => sttSupported && handleSelect("voice")}
           disabled={!sttSupported}
         >
           <div className={styles.modeIcon}>🎤</div>
@@ -937,10 +983,11 @@ function ModeSelectCard({ onSelect, sttSupported, topics }) {
           </p>
         </button>
       </div>
+
       <div className={styles.topicPreview}>
-        <p className={styles.cardEyebrow}>분석된 주제</p>
+        <p className={styles.cardEyebrow}>분석된 주제 (상위 {topicCount}개 진행)</p>
         <div className={styles.topicPreviewList}>
-          {topics.map((t, idx) => (
+          {topics.slice(0, topicCount).map((t, idx) => (
             <div key={t.id || idx} className={styles.topicPreviewChip}>
               <span className={styles.topicPreviewNumber}>{idx + 1}</span>
               <span>{t.title}</span>
